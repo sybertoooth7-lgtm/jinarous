@@ -54,8 +54,8 @@ In the `app/` frontend project:
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/api/health` | — | Health check |
-| GET | `/api/status/defense-matrix` | — | Real, live server metrics (requests, latency, contact success rate, honeypot catches) powering the landing page's "AI Defense Matrix" section |
+| GET | `/api/health` | — | Shallow health check — is the process up |
+| GET | `/api/health/deep` | — | Deep health check — is the process up **and** can it reach the database. Point real uptime monitoring at this one. |
 | GET | `/api/status/defense-matrix` | — | Public, real-time server metrics powering the landing page's "AI Defense Matrix" section |
 | POST | `/api/contact` | — | Submit the contact form. Rate-limited per IP. |
 | POST | `/api/admin/login` | — | Log in, returns `{ token, email }` |
@@ -85,6 +85,16 @@ This is a standard Node app, so it runs on any Node host: Railway, Render, Fly.i
 
 - Passwords are hashed with bcrypt (12 rounds); plaintext passwords are never stored.
 - Admin sessions are stateless JWTs (default expiry 8h, configurable via `JWT_EXPIRES_IN`).
-- The contact endpoint is rate-limited (default: 5 requests / 15 minutes / IP) and includes a hidden honeypot field to deter simple bots.
-- `helmet` sets standard security headers; CORS is restricted to `CORS_ORIGIN`.
+- The contact endpoint is rate-limited (default: 5 requests / 15 minutes / IP) and includes a hidden honeypot field to deter simple bots. Admin endpoints have their own general rate limit (300 requests / 5 min) on top of the stricter login-specific limit (10 attempts / 15 min), so a leaked token can't be used to hammer the API.
+- A real `Content-Security-Policy` is enforced via `helmet` (not disabled) — the admin dashboard has no inline scripts/styles, so this doesn't need any relaxing. `Strict-Transport-Security` is enabled automatically when `NODE_ENV=production`.
+- CORS is restricted to `CORS_ORIGIN`.
+- Malformed request bodies return a plain `400` and are not treated as server errors — they don't get logged to error tracking or trigger alerts, keeping that signal meaningful.
 - The admin dashboard is served at `/admin` but is **not** listed anywhere on the public site — bookmark the URL. For stronger protection, put it behind your host's IP allowlist or a VPN in production.
+
+## Monitoring, logging & alerts
+
+- **Logs**: structured JSON via `pino`/`pino-http`, written to stdout. On Railway (and most hosts) stdout is automatically captured and searchable in the platform's logs dashboard — no extra log-shipping setup needed. Health-check pings are excluded from the request log to keep it readable. Set verbosity with `LOG_LEVEL` (`.env`).
+- **Error tracking**: optional Sentry integration. Set `SENTRY_DSN` in `.env` to start sending exceptions there; leave it blank and it's a no-op (errors still get logged locally either way — nothing is lost, you just won't have Sentry's dashboard/grouping/alerting on top).
+- **Alerts**: set `ALERT_WEBHOOK_URL` to a Slack or Discord "incoming webhook" URL to get pinged there on unhandled server errors and crashes. Throttled to once per 5 minutes per error type so a burst of the same failure doesn't spam the channel.
+- **Uptime monitoring**: not built into the app itself (that's an external service's job) — point a free uptime checker (e.g. UptimeRobot, Better Uptime, or your host's built-in health checks) at `GET /api/health/deep`, not `/api/health`. The deep check actually queries the database, so it catches "server is up but can't reach its data" failures that the shallow check would miss.
+

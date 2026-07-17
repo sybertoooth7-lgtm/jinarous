@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import morgan from 'morgan';
+import pinoHttp from 'pino-http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -10,9 +10,15 @@ import contactRoutes from './routes/contact.js';
 import adminRoutes from './routes/admin.js';
 import statusRoutes from './routes/status.js';
 import { recordRequest } from './stats.js';
+import { logger } from './logger.js';
+import { initErrorTracking, captureError, sendAlert } from './monitoring.js';
+import db from './db.js';
+
+initErrorTracking();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+const isProduction = process.env.NODE_ENV === 'production';
 
 app.set('trust proxy', 1);
 
@@ -21,9 +27,23 @@ const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .map((o) => o.trim())
   .filter(Boolean);
 
+// Real security headers. The admin dashboard is a plain static page with no
+// inline scripts/styles, so we can run a real Content-Security-Policy instead
+// of disabling it.
 app.use(
   helmet({
-    contentSecurityPolicy: false, // the admin dashboard is a simple static page; relax CSP for it
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    hsts: isProduction ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
   })
 );
 app.use(
@@ -33,7 +53,19 @@ app.use(
   })
 );
 app.use(express.json({ limit: '100kb' }));
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+
+// Structured JSON request logging (replaces morgan). In production, this
+// stdout stream is exactly what Railway/Render/etc. capture as your logs -
+// searchable and filterable in their dashboard with zero extra setup.
+app.use(
+  pinoHttp({
+    logger,
+    autoLogging: {
+      ignore: (req) => req.url === '/api/health',
+    },
+    redact: ['req.headers.authorization'],
+  })
+);
 
 // Real request-timing middleware - powers the public defense-matrix status endpoint
 app.use((req, res, next) => {
@@ -49,7 +81,21 @@ app.use((req, res, next) => {
 // Static admin dashboard (vanilla HTML/JS - no build step needed)
 app.use('/admin', express.static(path.join(__dirname, '..', 'public', 'admin')));
 
+// Shallow check: is the process up. Used by uptime pings / load balancers.
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
+
+// Deep check: is the process up AND can it actually reach the database.
+// Point real uptime monitoring (see backend/README.md) at this one, not /api/health.
+app.get('/api/health/deep', (req, res) => {
+  try {
+    db.prepare('SELECT 1').get();
+    res.json({ status: 'ok', database: 'reachable', time: new Date().toISOString() });
+  } catch (err) {
+    captureError(err, { route: '/api/health/deep' });
+    res.status(503).json({ status: 'error', database: 'unreachable' });
+  }
+});
+
 app.use('/api/contact', contactRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/status', statusRoutes);
@@ -60,12 +106,36 @@ app.use((req, res) => {
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  console.error(err);
+  // Malformed request bodies are a client mistake, not a server incident -
+  // return 400 and skip error tracking/alerts so those stay meaningful signal.
+  if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
+    return res.status(400).json({ error: 'Malformed request body.' });
+  }
+
+  captureError(err, { method: req.method, url: req.originalUrl });
+  sendAlert(
+    `🔴 Alux Plaza backend error on ${req.method} ${req.originalUrl}: ${err.message}`,
+    `${req.method} ${req.originalUrl}`
+  );
   res.status(500).json({ error: 'Something went wrong on our end.' });
+});
+
+process.on('unhandledRejection', (err) => {
+  captureError(err, { source: 'unhandledRejection' });
+  sendAlert(`🔴 Unhandled rejection in Alux Plaza backend: ${err.message}`, 'unhandledRejection');
+});
+
+process.on('uncaughtException', (err) => {
+  captureError(err, { source: 'uncaughtException' });
+  sendAlert(`🔴 Uncaught exception in Alux Plaza backend: ${err.message}`, 'uncaughtException');
+  // Let the process exit after logging - an uncaught exception means state may be
+  // corrupted. Your host (Railway etc.) will restart it per the restart policy
+  // in railway.json.
+  process.exit(1);
 });
 
 const port = process.env.PORT || 4000;
 app.listen(port, () => {
-  console.log(`Alux Plaza backend listening on http://localhost:${port}`);
-  console.log(`Admin dashboard at http://localhost:${port}/admin`);
+  logger.info(`Alux Plaza backend listening on http://localhost:${port}`);
+  logger.info(`Admin dashboard at http://localhost:${port}/admin`);
 });

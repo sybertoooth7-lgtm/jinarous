@@ -16,6 +16,19 @@ const loginLimiter = rateLimit({
   message: { error: 'Too many login attempts. Please try again later.' },
 });
 
+// General ceiling on authenticated admin API usage, independent of the
+// stricter login limiter above - guards against a leaked/stolen token being
+// used to hammer the submissions endpoints.
+const adminApiLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' },
+});
+
+router.use(adminApiLimiter);
+
 // --- Auth ---------------------------------------------------------------
 
 router.post(

@@ -41,6 +41,9 @@ jobs:
           echo "Checking /api/health..."
           curl -sf http://localhost:4000/api/health
 
+          echo "Checking /api/health/deep..."
+          curl -sf http://localhost:4000/api/health/deep
+
           echo "Checking /api/status/defense-matrix..."
           curl -sf http://localhost:4000/api/status/defense-matrix
 

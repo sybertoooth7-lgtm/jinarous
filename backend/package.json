@@ -10,6 +10,7 @@
     "create-admin": "node scripts/create-admin.js"
   },
   "dependencies": {
+    "@sentry/node": "^10.66.0",
     "bcryptjs": "^3.0.2",
     "better-sqlite3": "^12.4.1",
     "cors": "^2.8.5",
@@ -19,6 +20,7 @@
     "express-validator": "^7.2.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
-    "morgan": "^1.10.1"
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0"
   }
 }
