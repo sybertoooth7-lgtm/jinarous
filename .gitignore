@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+
+# backend
+backend/data/*.db
+backend/data/*.db-wal
+backend/data/*.db-shm
+
+# frontend
+frontend/dist/

@@ -1,0 +1,67 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Boot the server and smoke-test the API
+        run: |
+          cp .env.example .env
+          sed -i "s/change-this-to-a-long-random-string/$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")/" .env
+          node src/index.js &
+          SERVER_PID=$!
+          sleep 2
+
+          echo "Checking /api/health..."
+          curl -sf http://localhost:4000/api/health
+
+          echo "Checking /api/status/defense-matrix..."
+          curl -sf http://localhost:4000/api/status/defense-matrix
+
+          echo "Submitting a test contact form entry..."
+          curl -sf -X POST http://localhost:4000/api/contact \
+            -H "Content-Type: application/json" \
+            -d '{"firstName":"CI","lastName":"Test","email":"ci@example.com","message":"automated smoke test"}'
+
+          kill $SERVER_PID
+
+      - name: Verify honeypot field rejects bot-shaped submissions
+        run: |
+          node src/index.js &
+          SERVER_PID=$!
+          sleep 2
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:4000/api/contact \
+            -H "Content-Type: application/json" \
+            -d '{"firstName":"Bot","lastName":"Spam","email":"bot@spam.com","website":"http://spam.com"}')
+          kill $SERVER_PID
+          if [ "$STATUS" != "400" ]; then
+            echo "Expected honeypot submission to be rejected with 400, got $STATUS"
+            exit 1
+          fi
+          echo "Honeypot correctly rejected with 400"
