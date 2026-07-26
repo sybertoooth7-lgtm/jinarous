@@ -1,0 +1,10 @@
+﻿Connect frontend to backend and serve standalone landing page from Vite
+
+- Wire standalone alux-plaza.html contact form to backend /api/contact
+- Pull live data from /api/status/defense-matrix into the page
+- Add honeypot field and form error handling
+- Copy alux-plaza.html into frontend/public so Vite serves it
+- Add backend/.env for local dev and frontend/.env to point VITE_API_BASE_URL
+- Update backend README and .env.example for local dev
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
