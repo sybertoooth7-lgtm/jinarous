@@ -47,6 +47,31 @@ Frontend runs at `http://localhost:3000` (or `5173`, check the terminal output) 
 
 **Worth knowing:** the live Defense Matrix numbers are genuinely computed from this server's own traffic — they are not a real AI threat-detection system. Alux Plaza remains a fictional cybersecurity brand; what's real is the engineering (the numbers reflect actual server behavior, not scripted fiction).
 
+## Tools
+
+`tools/auth_audit.py` — a real, working Access Control & Authentication Audit scanner. This backs the "Access Control & Authentication Audit" service card on the landing page (formerly "Behavioral Biometric AI") — every finding it produces is real and independently reproducible, not simulated.
+
+**What it checks:**
+1. Transport security — HTTPS enforcement, TLS redirect behavior, certificate validity
+2. Security headers — HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, server/version disclosure
+3. Cookie security — Secure / HttpOnly / SameSite flags on session cookies
+4. JWT hygiene — signing algorithm, expiry, sensitive data in payload (optional, pass a sample token)
+5. Login endpoint hardening — a small, capped probe to check for rate-limiting/lockout behavior
+
+**Setup:**
+```bash
+pip install requests
+```
+
+**Usage:**
+```bash
+python3 tools/auth_audit.py https://example.com
+python3 tools/auth_audit.py https://example.com --login-path /api/login --jwt <sample_token>
+python3 tools/auth_audit.py https://example.com --out report.json
+```
+
+**Important:** this is a passive-first, non-destructive tool — it does not brute-force credentials or exploit anything. Only run it against systems you own or have explicit written authorization to test. See `docs/access-control-audit-methodology.md` for the full service methodology, engagement scope, and severity framework this tool supports.
+
 ## Deploying to production
 
 See `backend/README.md` for full details. Short version:
