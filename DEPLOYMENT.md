@@ -1,3 +1,4 @@
+[DEPLOYMENT.md](https://github.com/user-attachments/files/30561871/DEPLOYMENT.md)
 # Deploying Alux Plaza
 
 This covers getting the project into version control, then live on Railway (backend) + Vercel (frontend), with GitHub Actions running tests on every push.
