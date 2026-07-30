@@ -18,7 +18,7 @@ services:
       - ./backend/.env
     environment:
       # Overrides whatever DB_PATH is in .env, to match the volume mount
-      # below - keeps the "where does data actually live" question in one
+      # below - keeps the "wherea does data actually live" question in one
       # place (this file) rather than split across .env AND compose.
       DB_PATH: /app/data/alux.db
     volumes:
