@@ -1,10 +1,13 @@
 :root {
-  --navy-base: #0a0e1a;
+  /* These hex values are pulled directly from the main site (alux-plaza.html)
+     rather than approximated, so the admin dashboard doesn't visually drift
+     from the product it's part of. */
+  --navy-base: #0a1628;
   --navy-surface: #111827;
-  --cyan: #22d3ee;
-  --purple: #a78bfa;
-  --green: #34d399;
-  --red: #f87171;
+  --cyan: #00d4ff;
+  --purple: #a855f7;
+  --green: #00ff88;
+  --red: #ff3366;
   --text: #e2e8f0;
   --muted: #94a3b8;
   --border: rgba(255, 255, 255, 0.1);
@@ -17,7 +20,18 @@ body {
   min-height: 100vh;
   background: var(--navy-base);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Matches the main site's body font exactly (see frontend/index.html) */
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+h1, h2, .login-card h1 {
+  /* Matches the main site's heading font */
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+.badge, th, .num {
+  /* Matches the main site's use of JetBrains Mono for labels/metrics */
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
 }
 
 .view[hidden] { display: none; }
