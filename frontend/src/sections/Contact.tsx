@@ -2,10 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { Mail, Phone, MapPin, Zap, CheckCircle } from 'lucide-react';
+import { API_BASE } from '@/lib/api';
 
 gsap.registerPlugin(ScrollTrigger);
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 interface FormData {
   firstName: string;
@@ -135,6 +134,30 @@ export default function Contact() {
         const data = await res.json().catch(() => ({}));
 
         if (!res.ok) {
+          // The backend returns a generic "Validation failed." for every
+          // 400, with per-field messages in `details`. Show the SPECIFIC
+          // real-field message when there is one (e.g. "A valid email is
+          // required.") rather than the unhelpful generic string.
+          //
+          // Special case: if the ONLY problem is the hidden honeypot field
+          // (`website`) - which can happen to a genuine human if a browser
+          // extension or password manager auto-fills every input on the
+          // page, not just a bot - don't show the raw "Spam detected."
+          // message, which would be confusing since the user can't see
+          // that field at all. Give them a real way to still reach us
+          // instead of a dead end.
+          type ValidationDetail = { path?: string; msg?: string };
+          const details: ValidationDetail[] = Array.isArray(data.details) ? data.details : [];
+          const realFieldErrors = details.filter((d) => d.path && d.path !== 'website');
+
+          if (realFieldErrors.length > 0) {
+            throw new Error(realFieldErrors[0].msg || data.error || 'Please check the form and try again.');
+          }
+          if (details.some((d) => d.path === 'website')) {
+            throw new Error(
+              "We couldn't submit this automatically. Please email us directly at neural@aluxplaza.com and we'll follow up right away."
+            );
+          }
           throw new Error(data.error || 'Something went wrong. Please try again.');
         }
 
@@ -293,16 +316,21 @@ export default function Contact() {
                       className={`${inputClass} resize-none`}
                     />
                   </div>
-                  {/* Honeypot field - hidden from real users, catches simple bots */}
-                  <input
-                    type="text"
-                    tabIndex={-1}
-                    autoComplete="off"
-                    value={formData.website}
-                    onChange={handleChange('website')}
-                    className="absolute -left-[9999px] w-px h-px opacity-0"
-                    aria-hidden="true"
-                  />
+                  {/* Honeypot field - real users never fill this in; bots often do.
+                      Wrapped in display:none (not just off-screen positioning), since
+                      that's the technique browsers, screen readers, AND password
+                      managers/autofill all reliably skip - off-screen-only hiding can
+                      still get swept up by "fill all fields" autofill behavior in some
+                      browsers/extensions, which would silently reject a real user. */}
+                  <div style={{ display: 'none' }} aria-hidden="true">
+                    <input
+                      type="text"
+                      name="website"
+                      autoComplete="off"
+                      value={formData.website}
+                      onChange={handleChange('website')}
+                    />
+                  </div>
                   {errors.submit && (
                     <p className="text-alux-red text-sm text-center">{errors.submit}</p>
                   )}
