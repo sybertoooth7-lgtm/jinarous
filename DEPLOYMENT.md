@@ -86,5 +86,5 @@ Included in this repo: `.github/workflows/backend-ci.yml` (runs tests) and `.git
 
 **Doesn't (yet):**
 - No staging/preview environments per PR (Railway and Vercel both support this natively if you want it later — Vercel does it automatically for every PR by default)
-- No automated database migrations (this project's schema is simple enough that `db.js` just runs `CREATE TABLE IF NOT EXISTS` on boot — fine for now, but revisit if the schema grows)
+- Automated database migrations now exist (`backend/migrations/*.sql`, run automatically at boot via `db.js`, or explicitly via `npm run migrate`) - schema changes are tracked in a `_migrations` ledger table instead of being untracked inline DDL.
 - No rollback automation — if a deploy breaks something, you currently roll back manually from Railway/Vercel's dashboard (both keep deploy history and support one-click rollback)
