@@ -1,0 +1,51 @@
+# Local/self-hosted full-stack setup. NOT how you'd necessarily deploy to
+# Railway/Vercel (those platforms build each service independently from
+# their own configs - railway.json, vercel.json), but this is the fastest
+# way to run the whole stack identically on any machine with Docker, and a
+# reasonable starting point for self-hosting on a VPS.
+#
+# Usage:
+#   cp backend/.env.example backend/.env   # then edit backend/.env
+#   docker compose up --build
+
+services:
+  backend:
+    build:
+      context: ./backend
+    ports:
+      - "4000:4000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Overrides whatever DB_PATH is in .env, to match the volume mount
+      # below - keeps the "where does data actually live" question in one
+      # place (this file) rather than split across .env AND compose.
+      DB_PATH: /app/data/alux.db
+    volumes:
+      # Named volume so the SQLite file survives `docker compose down` and
+      # container rebuilds - this is the same persistent-volume requirement
+      # called out in DEPLOYMENT.md for Railway/Render, just expressed in
+      # Docker's terms instead.
+      - alux-data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Since it's all one Docker network, the frontend can reach the
+        # backend by service name. If you're deploying frontend/backend to
+        # DIFFERENT hosts (e.g. Vercel + Railway, as DEPLOYMENT.md
+        # describes), set this to the backend's real public URL instead.
+        VITE_API_BASE_URL: http://localhost:4000
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  alux-data:
