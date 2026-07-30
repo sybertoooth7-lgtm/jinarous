@@ -9,10 +9,9 @@ import {
   RefreshCw,
   Lock,
 } from 'lucide-react';
+import { API_BASE } from '@/lib/api';
 
 gsap.registerPlugin(ScrollTrigger);
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 interface LiveLayerStatus {
   id: string;
@@ -220,20 +219,25 @@ export default function DefenseMatrix() {
                 <span className="text-xs text-[#475569]">
                   {liveStatus[layer.id]?.metricLabel ?? layer.fallbackLabel}:{' '}
                   <span className="font-mono" style={{ color: layer.color }}>
-                    {liveStatus[layer.id]?.metricValue ?? layer.fallbackValue}
+                    {isLive ? (liveStatus[layer.id]?.metricValue ?? layer.fallbackValue) : 'Offline'}
                   </span>
                 </span>
                 <span
                   className={`px-2 py-0.5 text-[10px] rounded-full font-mono ${
-                    liveStatus[layer.id]?.status === 'idle'
+                    !isLive || liveStatus[layer.id]?.status === 'idle'
                       ? 'bg-[#475569]/10 text-[#94a3b8]'
                       : 'bg-alux-green/10 text-alux-green'
                   }`}
                 >
-                  {liveStatus[layer.id]?.status === 'idle' ? 'IDLE' : 'ACTIVE'}
+                  {/* Previously defaulted to ACTIVE/green whenever the backend was
+                      unreachable (liveStatus[layer.id]?.status was simply undefined,
+                      which !== 'idle', so the ACTIVE branch fired) - showing a
+                      reassuring green badge next to blank data, which looked broken
+                      and was actively misleading about real system status. */}
+                  {!isLive ? 'OFFLINE' : liveStatus[layer.id]?.status === 'idle' ? 'IDLE' : 'ACTIVE'}
                 </span>
               </div>
-              {liveStatus[layer.id]?.detail && (
+              {isLive && liveStatus[layer.id]?.detail && (
                 <p className="text-[10px] text-[#475569] mt-2 font-mono">
                   {liveStatus[layer.id].detail}
                 </p>
