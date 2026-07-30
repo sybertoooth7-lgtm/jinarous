@@ -7,4 +7,3 @@ export default defineConfig({
     fileParallelism: false, // tests share a SQLite file; run sequentially to avoid contention
   },
 });
-
