@@ -8,8 +8,8 @@ import { sendContactNotification } from '../lib/email.js';
 const router = Router();
 
 const contactLimiter = rateLimit({
-  windowMs: Number(process.env.CONTACT_RATE_LIMIT_WINDOW_MINUTES || 15) * 60 * 1000,
-  max: Number(process.env.CONTACT_RATE_LIMIT_MAX || 5),
+  windowMs: (Number(process.env.CONTACT_RATE_LIMIT_WINDOW_MINUTES) || 15) * 60 * 1000,
+  max: Number(process.env.CONTACT_RATE_LIMIT_MAX) || 5,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many contact attempts. Please try again later.' },
@@ -22,7 +22,7 @@ router.post(
     body('name').trim().isLength({ min: 1, max: 100 }).escape(),
     body('email').trim().isEmail().normalizeEmail().isLength({ max: 255 }),
     body('message').trim().isLength({ min: 1, max: 5000 }).escape(),
-    body('honeypot').optional().trim(),
+    body('honeypot').optional({ checkFalsy: true }).trim(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
