@@ -15,10 +15,10 @@ gsap.registerPlugin(ScrollTrigger);
 
 function App() {
   useEffect(() => {
-    // Global scroll-triggered reveals
+    const triggers: ScrollTrigger[] = [];
     const revealElements = document.querySelectorAll('.reveal');
     revealElements.forEach((el) => {
-      gsap.fromTo(
+      const tween = gsap.fromTo(
         el,
         { opacity: 0, y: 40 },
         {
@@ -33,25 +33,26 @@ function App() {
           },
         }
       );
+      if (tween.scrollTrigger) {
+        triggers.push(tween.scrollTrigger);
+      }
     });
 
     return () => {
-      ScrollTrigger.getAll().forEach((t) => t.kill());
+      triggers.forEach((t) => t.kill());
     };
   }, []);
 
   return (
     <div className="min-h-screen bg-navy-base text-white overflow-x-hidden">
       <Navigation />
-      <main>
-        <Hero />
-        <AICore />
-        <DefenseMatrix />
-        <Services />
-        <NeuralLab />
-        <CTA />
-        <Contact />
-      </main>
+      <Hero />
+      <AICore />
+      <DefenseMatrix />
+      <Services />
+      <NeuralLab />
+      <CTA />
+      <Contact />
       <Footer />
     </div>
   );
