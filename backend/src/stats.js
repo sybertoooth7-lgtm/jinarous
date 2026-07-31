@@ -17,6 +17,8 @@ export const stats = {
   contactAttempts: await loadPersistedValue('contactAttempts'),
   contactSuccesses: await loadPersistedValue('contactSuccesses'),
   honeypotBlocked: await loadPersistedValue('honeypotBlocked'),
+  instanceRequestCount: 0, // only this process
+  instanceErrorCount: 0,
 };
 
 let dirty = false;
@@ -40,7 +42,11 @@ process.on('SIGINT', () => persistStats().catch(console.error));
 
 export function recordRequest(latencyMs, isError) {
   stats.requestCount += 1;
-  if (isError) stats.errorCount += 1;
+  stats.instanceRequestCount += 1;
+  if (isError) {
+    stats.errorCount += 1;
+    stats.instanceErrorCount += 1;
+  }
   stats.latencies.push(latencyMs);
   if (stats.latencies.length > MAX_LATENCY_SAMPLES) stats.latencies.shift();
   dirty = true;
@@ -73,7 +79,7 @@ export function getAverageLatencyMs() {
 export function getRequestsPerSecond() {
   const uptime = getUptimeSeconds();
   if (uptime <= 0) return 0;
-  return stats.requestCount / uptime;
+  return stats.instanceRequestCount / uptime;
 }
 
 export function getAutoResponseRate() {
