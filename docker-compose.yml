@@ -1,51 +1,50 @@
-# Local/self-hosted full-stack setup. NOT how you'd necessarily deploy to
-# Railway/Vercel (those platforms build each service independently from
-# their own configs - railway.json, vercel.json), but this is the fastest
-# way to run the whole stack identically on any machine with Docker, and a
-# reasonable starting point for self-hosting on a VPS.
-#
-# Usage:
-#   cp backend/.env.example backend/.env   # then edit backend/.env
-#   docker compose up --build
+version: "3.8"
 
 services:
-  backend:
+  app:
     build:
       context: ./backend
+      dockerfile: Dockerfile
     ports:
       - "4000:4000"
-    env_file:
-      - ./backend/.env
     environment:
-      # Overrides whatever DB_PATH is in .env, to match the volume mount
-      # below - keeps the "where does data actually live" question in one
-      # place (this file) rather than split across .env AND compose.
-      DB_PATH: /app/data/alux.db
+      - NODE_ENV=production
+      - PORT=4000
+      - DB_PATH=/data/alux.db        # switch to PostgreSQL later; for now, persistent volume
+      - CORS_ORIGIN=${CORS_ORIGIN}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=8h
+      - CLUSTER_MODE=true
+      - CONTACT_RATE_LIMIT_WINDOW_MINUTES=15
+      - CONTACT_RATE_LIMIT_MAX=5
+      - SENTRY_DSN=${SENTRY_DSN}
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL}
     volumes:
-      # Named volume so the SQLite file survives `docker compose down` and
-      # container rebuilds - this is the same persistent-volume requirement
-      # called out in DEPLOYMENT.md for Railway/Render, just expressed in
-      # Docker's terms instead.
-      - alux-data:/app/data
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-  frontend:
-    build:
-      context: ./frontend
-      args:
-        # Since it's all one Docker network, the frontend can reach the
-        # backend by service name. If you're deploying frontend/backend to
-        # DIFFERENT hosts (e.g. Vercel + Railway, as DEPLOYMENT.md
-        # describes), set this to the backend's real public URL instead.
-        VITE_API_BASE_URL: http://localhost:4000
-    ports:
-      - "3000:80"
+      - app-data:/data
     depends_on:
-      - backend
+      - redis
+    restart: unless-stopped
+    deploy:
+      replicas: 2                    # horizontal scale; needs PostgreSQL to work safely
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  # Uncomment when you're ready to migrate from SQLite:
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: alux
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
+  #     POSTGRES_DB: alux_plaza
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   restart: unless-stopped
 
 volumes:
-  alux-data:
+  app-data:
+  redis-data:
+  # postgres-data:
