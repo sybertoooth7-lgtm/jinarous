@@ -21,3 +21,11 @@ export function authenticateToken(req, res, next) {
     return res.status(403).json({ error: 'Invalid or expired token.' });
   }
 }
+
+export function requireAdmin(req, res, next) {
+  authenticateToken(req, res, () => {
+    // In this single-tenant app, any valid token holder is treated as admin.
+    // If you add multi-role support later, check req.user.role === 'admin' here.
+    next();
+  });
+}
