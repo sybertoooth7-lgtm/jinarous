@@ -1,3 +1,4 @@
+[access-control-audit-methodology.md](https://github.com/user-attachments/files/30592160/access-control-audit-methodology.md)
 # Access Control & Authentication Audit — Service Methodology
 
 *A real, deliverable security service. Replaces "Behavioral Biometric AI" fiction with an actual auditable process.*
@@ -21,6 +22,9 @@ Small businesses running their own login system — e-commerce admin panels, Saa
 | 5. Follow-up (optional) | Re-test after client applies fixes | Confirmation letter / before-after summary |
 
 ## What the automated tool checks (see `auth_audit.py`)
+
+**Delivery path:** this tool is runnable directly from the admin dashboard (`/admin` → Tools tab) — enter a target URL, get results rendered inline, saved to a persistent run history. It no longer requires terminal/CLI access to deliver, closing the gap between "a client asks for this service via the contact form" and "someone actually runs it."
+
 
 1. **Transport security** — is everything forced over HTTPS, does the TLS cert validate
 2. **Security headers** — HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, and whether server/version info is leaking
