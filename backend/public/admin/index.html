@@ -1,141 +1,61 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Alux Plaza — Admin</title>
-  <meta name="robots" content="noindex, nofollow" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <!-- Same font families as the main site (frontend/index.html), so the
-       admin dashboard doesn't look like a different, unrelated product. -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="admin.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Login</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0f; color: #e2e8f0;
+      display: flex; justify-content: center; align-items: center;
+      height: 100vh; margin: 0;
+    }
+    form {
+      background: #111118; padding: 2.5rem; border-radius: 12px;
+      width: 100%; max-width: 360px; border: 1px solid #1f1f2e;
+    }
+    h2 { margin: 0 0 1.5rem; font-size: 1.5rem; }
+    input {
+      width: 100%; padding: 0.75rem 1rem; margin-bottom: 1rem;
+      background: #0a0a0f; border: 1px solid #2a2a3c; color: #e2e8f0;
+      border-radius: 6px; font-size: 1rem;
+    }
+    input:focus { outline: none; border-color: #3b82f6; }
+    button {
+      width: 100%; padding: 0.75rem; background: #3b82f6; color: #fff;
+      border: none; border-radius: 6px; font-size: 1rem; cursor: pointer;
+    }
+    button:hover { background: #2563eb; }
+    .error { color: #ef4444; margin-top: 0.75rem; font-size: 0.875rem; }
+  </style>
 </head>
 <body>
-  <!-- Login screen -->
-  <div id="login-view" class="view">
-    <form id="login-form" class="login-card">
-      <h1>Alux Plaza Admin</h1>
-      <p class="subtitle">Sign in to view contact submissions</p>
-      <label for="email">Email</label>
-      <input id="email" type="email" autocomplete="username" required />
-      <label for="password">Password</label>
-      <input id="password" type="password" autocomplete="current-password" required />
-      <button type="submit">Sign In</button>
-      <p id="login-error" class="error" hidden></p>
-    </form>
-  </div>
-
-  <!-- Dashboard -->
-  <div id="dashboard-view" class="view" hidden>
-    <header class="topbar">
-      <h1>Alux Plaza — Admin</h1>
-      <div class="topbar-right">
-        <span id="admin-email"></span>
-        <button id="logout-btn" class="btn-secondary">Log out</button>
-      </div>
-    </header>
-
-    <nav class="tabs">
-      <button class="tab-btn active" data-tab="submissions">Submissions</button>
-      <button class="tab-btn" data-tab="tools">Tools</button>
-    </nav>
-
-    <!-- Submissions tab -->
-    <div id="tab-submissions" class="tab-panel">
-      <section class="stats" id="stats"></section>
-
-      <section class="toolbar">
-        <input id="search-input" type="search" placeholder="Search name, email, company…" />
-        <select id="status-filter">
-          <option value="">All statuses</option>
-          <option value="new">New</option>
-          <option value="read">Read</option>
-          <option value="archived">Archived</option>
-        </select>
-        <button id="refresh-btn" class="btn-secondary">Refresh</button>
-      </section>
-
-      <section>
-        <table id="submissions-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Company</th>
-              <th>Message</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="submissions-body">
-            <tr><td colspan="7" class="empty">Loading…</td></tr>
-          </tbody>
-        </table>
-        <div class="pagination">
-          <button id="prev-page" class="btn-secondary">Prev</button>
-          <span id="page-info"></span>
-          <button id="next-page" class="btn-secondary">Next</button>
-        </div>
-      </section>
-    </div>
-
-    <!-- Tools tab: connects the "Access Control & Authentication Audit"
-         service sold on the landing page to something actually runnable
-         from here, instead of being a disconnected CLI script. -->
-    <div id="tab-tools" class="tab-panel" hidden>
-      <section class="tool-run-form">
-        <h2>Access Control &amp; Authentication Audit</h2>
-        <p class="subtitle">Run the real audit tool (tools/auth_audit.py) against a target and get a report right here — the same tool documented in tools/README.md and docs/access-control-audit-methodology.md.</p>
-        <form id="audit-form">
-          <label for="audit-url">Target URL</label>
-          <input id="audit-url" type="url" placeholder="https://client-site.com" required />
-
-          <div class="form-row">
-            <div>
-              <label for="audit-login-path">Login path (optional)</label>
-              <input id="audit-login-path" type="text" placeholder="/api/login" />
-            </div>
-            <div>
-              <label for="audit-jwt">Sample JWT (optional)</label>
-              <input id="audit-jwt" type="text" placeholder="eyJhbGc..." />
-            </div>
-          </div>
-
-          <p class="tool-scope-note">Only run this against sites you own or have explicit written authorization to test. This checks transport security, headers, cookies, JWT hygiene, and login hardening — see tools/README.md for what it does <em>not</em> cover (SQL injection, XSS, business logic flaws).</p>
-
-          <button type="submit" id="run-audit-btn">Run Audit</button>
-          <span id="audit-error" class="error" hidden></span>
-        </form>
-      </section>
-
-      <section id="audit-result-section" hidden>
-        <h3>Result</h3>
-        <div id="audit-result"></div>
-      </section>
-
-      <section>
-        <h3>Recent Runs</h3>
-        <table id="runs-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Target</th>
-              <th>Status</th>
-              <th>Summary</th>
-              <th>Run by</th>
-            </tr>
-          </thead>
-          <tbody id="runs-body">
-            <tr><td colspan="5" class="empty">Loading…</td></tr>
-          </tbody>
-        </table>
-      </section>
-    </div>
-  </div>
-
-  <script src="admin.js"></script>
+  <form id="loginForm">
+    <h2>Admin Login</h2>
+    <input type="email" id="email" placeholder="Email" required autocomplete="email">
+    <input type="password" id="password" placeholder="Password" required autocomplete="current-password">
+    <button type="submit">Log In</button>
+    <div class="error" id="error"></div>
+  </form>
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      try {
+        const res = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        if (!res.ok) throw new Error('Invalid credentials');
+        window.location.href = '/admin/index.html';
+      } catch (err) {
+        document.getElementById('error').textContent = err.message;
+      }
+    });
+  </script>
 </body>
 </html>
