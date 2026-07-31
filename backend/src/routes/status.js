@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { authenticateToken } from '../middleware/auth.js';
 import {
   stats,
   getUptimeSeconds,
@@ -9,7 +10,7 @@ import {
 
 const router = Router();
 
-router.get('/defense-matrix', (req, res) => {
+router.get('/defense-matrix', authenticateToken, (req, res) => {
   res.json({
     requestCount: stats.requestCount,
     errorCount: stats.errorCount,
