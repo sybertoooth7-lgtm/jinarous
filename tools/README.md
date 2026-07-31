@@ -1,4 +1,4 @@
-[README.md](https://github.com/user-attachments/files/30561816/README.md)
+[README.md](https://github.com/user-attachments/files/30592244/README.md)
 # Tools
 
 Real, tested scripts backing the services described in `docs/`. Every tool
@@ -25,6 +25,18 @@ not a penetration test. If a client needs those deeper checks, that's a
 different, more manual (and typically more expensive) engagement - say so
 explicitly rather than letting the service name imply broader coverage
 than it has.
+
+**Now integrated into the product, not just a CLI script:** the admin
+dashboard's **Tools** tab (`/admin` -> Tools) lets you enter a target URL
+and run this tool directly, with results rendered inline and saved to a
+`tool_runs` history table (see `backend/src/routes/tools.js` and
+`backend/migrations/003_add_tool_runs.sql`). This closes the gap where a
+contact-form lead asking for this exact service had no actual delivery
+path other than someone manually running a terminal command. The CLI
+(`python3 tools/auth_audit.py <url>`) still works standalone too - the
+dashboard calls the same script with a `--json` flag added for clean
+machine-readable output (`--json` suppresses all the colored human-
+readable printing and outputs a single JSON object instead).
 
 ## network_audit.py — Firewall & Network Hardening Audit
 
