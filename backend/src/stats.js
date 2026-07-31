@@ -1,74 +1,48 @@
-// Tracks real, in-process server metrics used to power the public "AI Defense Matrix"
-// status endpoint. Nothing here is simulated business logic - it's genuine counters
-// derived from actual request traffic on this server.
-//
-// Cumulative counters (requestCount, errorCount, contactAttempts,
-// contactSuccesses, honeypotBlocked) are persisted to the `metrics` table in
-// SQLite so they survive a restart/redeploy - previously these lived only in
-// memory and silently reset to zero on every deploy, which undermined the
-// credibility of a dashboard whose whole pitch is "these are real numbers."
-//
-// Rolling/instantaneous values (the latency sample window, and uptime-since-
-// last-restart) are intentionally NOT persisted - they describe the current
-// process's live state, and resetting them on restart is correct behavior,
-// not a bug.
-
 import db from './db.js';
 
 const MAX_LATENCY_SAMPLES = 200;
 const PERSISTED_KEYS = ['requestCount', 'errorCount', 'contactAttempts', 'contactSuccesses', 'honeypotBlocked'];
-const FLUSH_INTERVAL_MS = 10_000;
+const FLUSH_INTERVAL_MS = 10000;
 
-function loadPersistedValue(key) {
-  const row = db.prepare('SELECT value FROM metrics WHERE key = ?').get(key);
-  return row ? row.value : 0;
+async function loadPersistedValue(key) {
+  const result = await db.query('SELECT value FROM metrics WHERE key = $1', [key]);
+  return result.rows[0] ? parseInt(result.rows[0].value, 10) : 0;
 }
-
-const upsertStmt = db.prepare(`
-  INSERT INTO metrics (key, value) VALUES (@key, @value)
-  ON CONFLICT(key) DO UPDATE SET value = excluded.value
-`);
 
 export const stats = {
   serverStartTime: Date.now(),
-  requestCount: loadPersistedValue('requestCount'),
-  errorCount: loadPersistedValue('errorCount'),
-  latencies: [], // rolling window, milliseconds - intentionally not persisted
-  contactAttempts: loadPersistedValue('contactAttempts'),
-  contactSuccesses: loadPersistedValue('contactSuccesses'),
-  honeypotBlocked: loadPersistedValue('honeypotBlocked'),
+  requestCount: await loadPersistedValue('requestCount'),
+  errorCount: await loadPersistedValue('errorCount'),
+  latencies: [],
+  contactAttempts: await loadPersistedValue('contactAttempts'),
+  contactSuccesses: await loadPersistedValue('contactSuccesses'),
+  honeypotBlocked: await loadPersistedValue('honeypotBlocked'),
 };
 
 let dirty = false;
 
-export function persistStats() {
+export async function persistStats() {
   if (!dirty) return;
-  const tx = db.transaction(() => {
+  await db.transaction(async (client) => {
     for (const key of PERSISTED_KEYS) {
-      upsertStmt.run({ key, value: stats[key] });
+      await client.query(`
+        INSERT INTO metrics (key, value) VALUES ($1, $2)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+      `, [key, stats[key]]);
     }
   });
-  tx();
   dirty = false;
 }
 
-// Flush periodically rather than on every single request, so a busy site
-// doesn't turn every request into an extra disk write.
-const flushInterval = setInterval(persistStats, FLUSH_INTERVAL_MS);
-flushInterval.unref(); // don't keep the process alive just for this timer
-
-// Flush on graceful shutdown so the last few requests before a redeploy
-// aren't lost. Railway/Render/etc. send SIGTERM before killing the process.
-process.on('SIGTERM', persistStats);
-process.on('SIGINT', persistStats);
+setInterval(() => persistStats().catch(console.error), FLUSH_INTERVAL_MS);
+process.on('SIGTERM', () => persistStats().catch(console.error));
+process.on('SIGINT', () => persistStats().catch(console.error));
 
 export function recordRequest(latencyMs, isError) {
   stats.requestCount += 1;
   if (isError) stats.errorCount += 1;
   stats.latencies.push(latencyMs);
-  if (stats.latencies.length > MAX_LATENCY_SAMPLES) {
-    stats.latencies.shift();
-  }
+  if (stats.latencies.length > MAX_LATENCY_SAMPLES) stats.latencies.shift();
   dirty = true;
 }
 
@@ -93,8 +67,7 @@ export function getUptimeSeconds() {
 
 export function getAverageLatencyMs() {
   if (stats.latencies.length === 0) return null;
-  const sum = stats.latencies.reduce((a, b) => a + b, 0);
-  return sum / stats.latencies.length;
+  return stats.latencies.reduce((a, b) => a + b, 0) / stats.latencies.length;
 }
 
 export function getRequestsPerSecond() {
