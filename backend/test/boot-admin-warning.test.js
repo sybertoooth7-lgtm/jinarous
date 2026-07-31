@@ -21,13 +21,28 @@ function bootServerAndCaptureLogs(env, port) {
     });
 
     let output = '';
-    proc.stdout.on('data', (chunk) => { output += chunk.toString(); });
-    proc.stderr.on('data', (chunk) => { output += chunk.toString(); });
-
-    setTimeout(() => {
+    let resolved = false;
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
       proc.kill('SIGTERM');
       resolve(output);
-    }, 1200);
+    };
+
+    proc.stdout.on('data', (chunk) => {
+      output += chunk.toString();
+      if (output.includes('backend listening')) {
+        // Give the boot-time log lines a brief moment to fully flush,
+        // then stop - more robust than a fixed timer that can be too
+        // short under machine load.
+        setTimeout(finish, 200);
+      }
+    });
+    proc.stderr.on('data', (chunk) => { output += chunk.toString(); });
+
+    // Safety net in case the server never logs the expected line at all
+    // (e.g. it crashed) - don't hang the test suite forever.
+    setTimeout(finish, 5000);
   });
 }
 
