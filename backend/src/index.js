@@ -35,7 +35,9 @@ async function startServer() {
   const app = express();
   const isProduction = config.isProduction;
 
-  app.set('trust proxy', 1);
+  if (isProduction) {
+    app.set('trust proxy', 1);
+  }
 
   app.use(helmet({
     contentSecurityPolicy: {
@@ -77,12 +79,12 @@ async function startServer() {
     next();
   });
 
-  // --- Auth-gated admin dashboard (login page is public) ---
+  // Auth-gated admin dashboard (login page is public)
   app.use('/admin', (req, res, next) => {
     const publicPaths = ['/login.html', '/login.js', '/login.css', '/assets/'];
     if (publicPaths.some(p => req.path.startsWith(p))) return next();
     authenticateToken(req, res, next);
-  }, express.static(path.join(__dirname, './', 'public', 'admin')));
+  }, express.static(path.join(__dirname, '..', 'public', 'admin')));
 
   app.get('/api/health', (req, res) =>
     res.json({ status: 'ok', time: new Date().toISOString() })
@@ -101,7 +103,7 @@ async function startServer() {
     }
   });
 
-  // --- Rate limiter: brute-force protection for login ---
+  // Rate limiter: brute-force protection for login
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 10,
@@ -162,18 +164,19 @@ async function startServer() {
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-  process.on('SIGHUP', () => gracefulShutdown('SIGHUP'));
 
   process.on('unhandledRejection', (err) => {
     captureError(err, { source: 'unhandledRejection' });
     sendAlert(`🔴 Unhandled rejection: ${err.message}`, 'unhandledRejection');
+    logger.error('Unhandled rejection — exiting immediately.');
+    process.exit(1);
   });
 
   process.on('uncaughtException', (err) => {
     captureError(err, { source: 'uncaughtException' });
     sendAlert(`🔴 Uncaught exception: ${err.message}`, 'uncaughtException');
-    logger.error('Uncaught exception — shutting down...');
-    gracefulShutdown('uncaughtException');
+    logger.error('Uncaught exception — exiting immediately.');
+    process.exit(1);
   });
 
   return server;
