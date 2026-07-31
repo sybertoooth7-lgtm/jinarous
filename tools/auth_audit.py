@@ -30,6 +30,7 @@ illegal even when well-intentioned.
 
 import argparse
 import base64
+import io
 import json
 import sys
 import time
@@ -46,19 +47,22 @@ INFO = "\033[96m"
 END = "\033[0m"
 
 
-def status_line(level, msg):
+def status_line(level, msg, quiet=False):
+    if quiet:
+        return
     color = {"PASS": GOOD, "WARN": WARN, "FAIL": BAD, "INFO": INFO}[level]
     print(f"  [{color}{level}{END}] {msg}")
 
 
 class AuthAuditReport:
-    def __init__(self, target):
+    def __init__(self, target, quiet=False):
         self.target = target
+        self.quiet = quiet
         self.findings = []  # (category, level, message, recommendation)
 
     def add(self, category, level, message, recommendation=None):
         self.findings.append((category, level, message, recommendation))
-        status_line(level, message)
+        status_line(level, message, quiet=self.quiet)
 
     def to_dict(self):
         return {
@@ -280,38 +284,65 @@ def main():
     parser.add_argument("--jwt", help="A sample JWT (e.g. from a test account) to analyze", default=None)
     parser.add_argument("--attempts", type=int, default=5, help="Number of requests for the rate-limit probe (default 5, kept low intentionally)")
     parser.add_argument("--out", help="Write JSON report to this file", default=None)
+    parser.add_argument(
+        "--json", action="store_true",
+        help="Output ONLY a JSON report to stdout (no colored/human text) - used by the admin "
+             "dashboard's 'Run Audit' integration (see backend/src/routes/tools.js) to parse "
+             "results programmatically. All the normal step-by-step output is suppressed in this mode."
+    )
     args = parser.parse_args()
 
     if not urlparse(args.url).scheme:
-        print("Error: URL must include scheme, e.g. https://example.com")
+        if args.json:
+            print(json.dumps({"error": "URL must include scheme, e.g. https://example.com"}))
+        else:
+            print("Error: URL must include scheme, e.g. https://example.com")
         sys.exit(1)
 
-    print(f"{INFO}Access Control & Authentication Audit{END}")
-    print(f"Target: {args.url}")
-    print("=" * 60)
+    if not args.json:
+        print(f"{INFO}Access Control & Authentication Audit{END}")
+        print(f"Target: {args.url}")
+        print("=" * 60)
 
     session = requests.Session()
     session.headers.update({"User-Agent": "AuthAuditTool/1.0 (authorized-security-review)"})
 
-    report = AuthAuditReport(args.url)
-    check_transport_security(session, args.url, report)
-    check_security_headers(session, args.url, report)
-    check_cookies(session, args.url, report)
-    check_jwt(args.jwt, report)
-    check_login_hardening(session, args.url, args.login_path, report, attempts=args.attempts)
+    report = AuthAuditReport(args.url, quiet=args.json)
+
+    # In --json mode, also suppress the "== N. Section Name ==" headers each
+    # check function prints directly (rather than editing every one of
+    # them to accept a quiet flag individually), by redirecting stdout to
+    # a null sink for the duration of the actual checks.
+    if args.json:
+        real_stdout = sys.stdout
+        sys.stdout = io.StringIO()
+    try:
+        check_transport_security(session, args.url, report)
+        check_security_headers(session, args.url, report)
+        check_cookies(session, args.url, report)
+        check_jwt(args.jwt, report)
+        check_login_hardening(session, args.url, args.login_path, report, attempts=args.attempts)
+    finally:
+        if args.json:
+            sys.stdout = real_stdout
 
     summary = report.summary()
-    print("\n" + "=" * 60)
-    print(f"{INFO}Summary:{END} "
-          f"{GOOD}{summary['PASS']} passed{END}, "
-          f"{WARN}{summary['WARN']} warnings{END}, "
-          f"{BAD}{summary['FAIL']} failed{END}, "
-          f"{INFO}{summary['INFO']} info{END}")
+
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print("\n" + "=" * 60)
+        print(f"{INFO}Summary:{END} "
+              f"{GOOD}{summary['PASS']} passed{END}, "
+              f"{WARN}{summary['WARN']} warnings{END}, "
+              f"{BAD}{summary['FAIL']} failed{END}, "
+              f"{INFO}{summary['INFO']} info{END}")
 
     if args.out:
         with open(args.out, "w") as f:
             json.dump(report.to_dict(), f, indent=2)
-        print(f"\nJSON report written to {args.out}")
+        if not args.json:
+            print(f"\nJSON report written to {args.out}")
 
 
 if __name__ == "__main__":
