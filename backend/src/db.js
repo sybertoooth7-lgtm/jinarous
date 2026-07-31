@@ -1,23 +1,48 @@
-import Database from 'better-sqlite3';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import pg from 'pg';
+const { Pool } = pg;
 import { runMigrations } from './migrations-runner.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = process.env.DB_PATH || './data/alux.db';
-const resolvedPath = path.isAbsolute(dbPath) ? dbPath : path.join(__dirname, '..', dbPath);
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' && process.env.DB_SSL !== 'false'
+    ? { rejectUnauthorized: false }
+    : false,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+});
 
-fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+try {
+  await pool.query('SELECT 1');
+  console.log('[db] PostgreSQL connected');
+} catch (err) {
+  console.error('[db] FATAL:', err.message);
+  process.exit(1);
+}
 
-export const db = new Database(resolvedPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+await runMigrations(pool);
 
-// Schema lives in migrations/*.sql now, not inline here - see
-// migrations-runner.js. This runs synchronously at import time, so a fresh
-// checkout (or CI run, or a new deploy after a schema change) always ends
-// up with the correct, up-to-date schema with zero manual steps.
-runMigrations(db);
+export const db = {
+  query(sql, params) {
+    return pool.query(sql, params);
+  },
+  exec(sql) {
+    return pool.query(sql);
+  },
+  async transaction(fn) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  },
+};
 
 export default db;
