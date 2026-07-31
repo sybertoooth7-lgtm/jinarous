@@ -229,3 +229,219 @@ th {
   color: var(--muted);
   font-size: 0.85rem;
 }
+
+/* --- Tabs -------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Visibility is actually controlled by the `hidden` attribute on each
+   panel's id (see admin.js tab-switching logic) - this class is just a
+   semantic marker for "this is a tab's content area," reset to zero
+   padding since each inner <section> already sets its own. */
+.tab-panel {
+  padding: 0;
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 14px 18px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.tab-btn.active {
+  color: var(--cyan);
+  border-bottom-color: var(--cyan);
+}
+
+.tab-btn:hover:not(.active) {
+  color: var(--text);
+}
+
+/* --- Tools: Access Control & Authentication Audit ---------------------- */
+
+.tool-run-form {
+  padding: 24px 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tool-run-form h2 {
+  font-size: 1.2rem;
+  margin: 0 0 6px;
+}
+
+.tool-run-form .subtitle {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0 0 18px;
+  max-width: 640px;
+}
+
+#audit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 640px;
+}
+
+#audit-form label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+#audit-form input {
+  width: 100%;
+  background: var(--navy-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 9px 12px;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.9rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.tool-scope-note {
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: rgba(255, 51, 102, 0.06);
+  border-left: 2px solid var(--red);
+  padding: 10px 12px;
+  border-radius: 4px;
+  margin: 4px 0;
+}
+
+#run-audit-btn {
+  align-self: flex-start;
+  background: var(--cyan);
+  color: #041018;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+#run-audit-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+#audit-result-section, #tab-tools > section:last-child {
+  padding: 24px 28px;
+}
+
+#audit-result-section h3, #tab-tools > section:last-child h3 {
+  font-size: 1rem;
+  margin: 0 0 14px;
+}
+
+.audit-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.audit-target {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--text);
+  margin-right: 6px;
+}
+
+.audit-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.audit-badge-fail { background: rgba(255, 51, 102, 0.15); color: var(--red); }
+.audit-badge-warn { background: rgba(201, 168, 76, 0.15); color: #c9a84c; }
+.audit-badge-pass { background: rgba(0, 255, 136, 0.15); color: var(--green); }
+.audit-badge-info { background: rgba(0, 212, 255, 0.15); color: var(--cyan); }
+
+.findings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.finding {
+  border-radius: 8px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--border);
+  background: var(--navy-surface);
+}
+
+.finding-fail { border-left-color: var(--red); }
+.finding-warn { border-left-color: #c9a84c; }
+.finding-pass { border-left-color: var(--green); }
+.finding-info { border-left-color: var(--cyan); }
+
+.finding-header {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.finding-level {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.finding-fail .finding-level { color: var(--red); }
+.finding-warn .finding-level { color: #c9a84c; }
+.finding-pass .finding-level { color: var(--green); }
+.finding-info .finding-level { color: var(--cyan); }
+
+.finding-category {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.finding-message {
+  margin: 0;
+  font-size: 0.87rem;
+  color: var(--text);
+}
+
+.finding-recommendation {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+#runs-table .run-row {
+  cursor: pointer;
+}
+
+#runs-table .run-row:hover {
+  background: rgba(0, 212, 255, 0.04);
+}
