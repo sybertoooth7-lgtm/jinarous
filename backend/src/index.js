@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import contactRoutes from './routes/contact.js';
 import adminRoutes from './routes/admin.js';
+import toolsRoutes from './routes/tools.js';
 import statusRoutes from './routes/status.js';
 import { recordRequest } from './stats.js';
 import { logger } from './logger.js';
@@ -114,6 +115,7 @@ app.get('/api/health/deep', (req, res) => {
 
 app.use('/api/contact', contactRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/tools', toolsRoutes);
 app.use('/api/status', statusRoutes);
 
 app.use((req, res) => {
