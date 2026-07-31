@@ -1,44 +1,41 @@
-import 'dotenv/config';
-import readline from 'node:readline/promises';
+import readline from 'node:readline';
 import bcrypt from 'bcryptjs';
 import db from '../src/db.js';
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+});
 
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+function question(prompt) {
+  return new Promise(resolve => rl.question(prompt, resolve));
 }
 
 async function main() {
-  console.log('=== Alux Plaza: Create / Reset Admin User ===\n');
-
-  let email = (await rl.question('Admin email: ')).trim().toLowerCase();
-  while (!isValidEmail(email)) {
-    email = (await rl.question('That does not look like a valid email. Try again: ')).trim().toLowerCase();
-  }
-
-  let password = await rl.question('Admin password (min 10 chars): ');
-  while (password.length < 10) {
-    password = await rl.question('Password too short. Enter at least 10 characters: ');
-  }
-
-  const passwordHash = bcrypt.hashSync(password, 12);
-
-  const existing = db.prepare('SELECT id FROM admin_users WHERE email = ?').get(email);
-
-  if (existing) {
-    db.prepare('UPDATE admin_users SET password_hash = ? WHERE email = ?').run(passwordHash, email);
-    console.log(`\nPassword updated for existing admin: ${email}`);
-  } else {
-    db.prepare('INSERT INTO admin_users (email, password_hash) VALUES (?, ?)').run(email, passwordHash);
-    console.log(`\nAdmin user created: ${email}`);
-  }
-
+  const email = await question('Admin email: ');
+  const password = await question('Admin password: ');
   rl.close();
+
+  if (!email || !password) {
+    console.error('Email and password are required.');
+    process.exit(1);
+  }
+
+  const hash = await bcrypt.hash(password, 12);
+
+  try {
+    await db.query(
+      `INSERT INTO admin_users (email, password_hash)
+       VALUES ($1, $2)
+       ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash`,
+      [email, hash]
+    );
+    console.log(`Admin user ${email} created/updated.`);
+    process.exit(0);
+  } catch (err) {
+    console.error('Failed to create admin:', err);
+    process.exit(1);
+  }
 }
 
-main().catch((err) => {
-  console.error(err);
-  rl.close();
-  process.exit(1);
-});
+main();
