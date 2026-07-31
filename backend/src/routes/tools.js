@@ -10,6 +10,15 @@
 // the audit via the contact form).
 
 import { Router } from 'express';
+import { authenticateToken } from '../middleware/auth.js';
+
+const router = Router();
+router.use(authenticateToken);
+
+// Your existing tool routes go here
+// router.post('/audit', ...)
+export default router;
+import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { body, param, validationResult } from 'express-validator';
 import { spawn } from 'node:child_process';
