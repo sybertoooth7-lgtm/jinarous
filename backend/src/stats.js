@@ -5,19 +5,30 @@ const PERSISTED_KEYS = ['requestCount', 'errorCount', 'contactAttempts', 'contac
 const FLUSH_INTERVAL_MS = 10000;
 
 async function loadPersistedValue(key) {
-  const result = await db.query('SELECT value FROM metrics WHERE key = $1', [key]);
-  return result.rows[0] ? parseInt(result.rows[0].value, 10) : 0;
+  try {
+    const result = await db.query('SELECT value FROM metrics WHERE key = $1', [key]);
+    return result.rows[0] ? parseInt(result.rows[0].value, 10) : 0;
+  } catch (err) {
+    console.error(`[stats] Failed to load ${key}, defaulting to 0:`, err.message);
+    return 0;
+  }
 }
+
+const requestCount = await loadPersistedValue('requestCount');
+const errorCount = await loadPersistedValue('errorCount');
+const contactAttempts = await loadPersistedValue('contactAttempts');
+const contactSuccesses = await loadPersistedValue('contactSuccesses');
+const honeypotBlocked = await loadPersistedValue('honeypotBlocked');
 
 export const stats = {
   serverStartTime: Date.now(),
-  requestCount: await loadPersistedValue('requestCount'),
-  errorCount: await loadPersistedValue('errorCount'),
+  requestCount,
+  errorCount,
   latencies: [],
-  contactAttempts: await loadPersistedValue('contactAttempts'),
-  contactSuccesses: await loadPersistedValue('contactSuccesses'),
-  honeypotBlocked: await loadPersistedValue('honeypotBlocked'),
-  instanceRequestCount: 0, // only this process
+  contactAttempts,
+  contactSuccesses,
+  honeypotBlocked,
+  instanceRequestCount: 0,
   instanceErrorCount: 0,
 };
 
