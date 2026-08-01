@@ -1,6 +1,4 @@
--- Stores the results of security tools run from the admin dashboard (e.g.
--- "Run Access Control Audit" against a lead's URL), so results are a real,
--- persisted report a client engagement can be built on.
+-- Stores the results of security tools run from the admin dashboard.
 
 CREATE TABLE IF NOT EXISTS tool_runs (
   id SERIAL PRIMARY KEY,
