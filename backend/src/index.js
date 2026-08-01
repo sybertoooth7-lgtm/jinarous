@@ -39,6 +39,11 @@ async function startServer() {
     app.set('trust proxy', 1);
   }
 
+  const connectSrc = ["'self'"];
+  if (config.corsOrigins.length) {
+    connectSrc.push(...config.corsOrigins);
+  }
+
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
@@ -47,7 +52,7 @@ async function startServer() {
         styleSrc: ["'self'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com'],
         imgSrc: ["'self'", 'data:'],
-        connectSrc: ["'self'"],
+        connectSrc,
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
       },
@@ -79,7 +84,6 @@ async function startServer() {
     next();
   });
 
-  // Auth-gated admin dashboard (login page is public)
   app.use('/admin', (req, res, next) => {
     const publicPaths = ['/login.html', '/login.js', '/login.css', '/assets/'];
     if (publicPaths.some(p => req.path.startsWith(p))) return next();
@@ -103,7 +107,6 @@ async function startServer() {
     }
   });
 
-  // Rate limiter: brute-force protection for login
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 10,
