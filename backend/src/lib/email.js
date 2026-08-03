@@ -1,12 +1,16 @@
 import { Resend } from 'resend';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
-const FROM_EMAIL = process.env.FROM_EMAIL || 'onboarding@resend.dev';
+const FROM_EMAIL = process.env.FROM_EMAIL;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 
 export async function sendContactNotification({ name, email, message, id }) {
   if (!resend) {
     console.log('[email] RESEND_API_KEY not set — skipping notification.');
+    return;
+  }
+  if (!FROM_EMAIL) {
+    console.log('[email] FROM_EMAIL not set — skipping notification.');
     return;
   }
   if (!ADMIN_EMAIL) {
