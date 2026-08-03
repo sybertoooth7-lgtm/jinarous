@@ -3,7 +3,7 @@ import { Shield } from 'lucide-react';
 const footerLinks = {
   services: {
     title: 'Neural Services',
-    links: ['AI Defense', 'Neural Perimeter', 'Predictive Risk', 'Data Vault', 'Incident Response'],
+    links: ['Incident Response', 'Vulnerability Assessment', 'Compliance Readiness', 'Data Protection Audit', 'Network Hardening'],
   },
   company: {
     title: 'Company',
