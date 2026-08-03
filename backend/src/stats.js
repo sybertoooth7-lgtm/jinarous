@@ -34,17 +34,44 @@ export const stats = {
 
 let dirty = false;
 
+// Tracks how much each counter has grown *since the last successful flush*,
+// per worker process. Under CLUSTER_MODE, every worker has its own copy of
+// `stats` — persisting the absolute value on each flush meant whichever
+// worker's timer fired last would silently overwrite the others' counts.
+// Persisting the delta instead means every worker's contribution adds up
+// correctly in the database, regardless of how many workers are running.
+const pendingDelta = Object.fromEntries(PERSISTED_KEYS.map(k => [k, 0]));
+
 export async function persistStats() {
   if (!dirty) return;
+  const deltas = { ...pendingDelta };
   await db.transaction(async (client) => {
     for (const key of PERSISTED_KEYS) {
+      if (!deltas[key]) continue;
       await client.query(`
         INSERT INTO metrics (key, value) VALUES ($1, $2)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-      `, [key, stats[key]]);
+        ON CONFLICT (key) DO UPDATE SET value = metrics.value + EXCLUDED.value
+      `, [key, deltas[key]]);
     }
   });
+  for (const key of PERSISTED_KEYS) pendingDelta[key] -= deltas[key];
   dirty = false;
+}
+
+// Cross-worker cumulative totals, read straight from the database. Any one
+// worker's in-memory `stats` object only reflects the traffic it personally
+// handled, so the live dashboard should use this — not `stats` directly —
+// for counters that are supposed to represent the whole cluster.
+export async function getPersistedTotals() {
+  const result = await db.query(
+    `SELECT key, value FROM metrics WHERE key = ANY($1)`,
+    [PERSISTED_KEYS]
+  );
+  const totals = Object.fromEntries(PERSISTED_KEYS.map(k => [k, 0]));
+  for (const row of result.rows) {
+    totals[row.key] = parseInt(row.value, 10);
+  }
+  return totals;
 }
 
 setInterval(() => persistStats().catch(console.error), FLUSH_INTERVAL_MS);
@@ -54,9 +81,11 @@ process.on('SIGINT', () => persistStats().catch(console.error));
 export function recordRequest(latencyMs, isError) {
   stats.requestCount += 1;
   stats.instanceRequestCount += 1;
+  pendingDelta.requestCount += 1;
   if (isError) {
     stats.errorCount += 1;
     stats.instanceErrorCount += 1;
+    pendingDelta.errorCount += 1;
   }
   stats.latencies.push(latencyMs);
   if (stats.latencies.length > MAX_LATENCY_SAMPLES) stats.latencies.shift();
@@ -65,16 +94,19 @@ export function recordRequest(latencyMs, isError) {
 
 export function recordContactAttempt() {
   stats.contactAttempts += 1;
+  pendingDelta.contactAttempts += 1;
   dirty = true;
 }
 
 export function recordContactSuccess() {
   stats.contactSuccesses += 1;
+  pendingDelta.contactSuccesses += 1;
   dirty = true;
 }
 
 export function recordHoneypotBlocked() {
   stats.honeypotBlocked += 1;
+  pendingDelta.honeypotBlocked += 1;
   dirty = true;
 }
 
