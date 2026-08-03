@@ -53,10 +53,27 @@ router.post(
 
 router.get('/submissions', authenticateToken, async (req, res) => {
   try {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+    const offset = (page - 1) * limit;
+
+    const countResult = await db.query('SELECT COUNT(*) AS total FROM contacts');
+    const total = parseInt(countResult.rows[0].total, 10);
+
     const result = await db.query(
-      'SELECT * FROM contacts ORDER BY created_at DESC LIMIT 100'
+      'SELECT id, name, email, message, created_at FROM contacts ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+      [limit, offset]
     );
-    res.json({ submissions: result.rows });
+
+    res.json({
+      submissions: result.rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
   } catch (err) {
     console.error('[admin] Fetch error:', err);
     res.status(500).json({ error: 'Failed to fetch submissions.' });
