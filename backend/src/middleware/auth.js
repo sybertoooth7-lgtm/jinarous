@@ -24,8 +24,6 @@ export function authenticateToken(req, res, next) {
 
 export function requireAdmin(req, res, next) {
   authenticateToken(req, res, () => {
-    // In this single-tenant app, any valid token holder is treated as admin.
-    // If you add multi-role support later, check req.user.role === 'admin' here.
     next();
   });
 }
