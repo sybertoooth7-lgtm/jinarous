@@ -16,75 +16,75 @@ gsap.registerPlugin(ScrollTrigger);
 
 const services = [
   {
-    title: 'Neural Perimeter Defense',
+    title: 'Incident Response Planning',
     description:
-      'Transformer networks analyze every packet in real-time. Zero-day exploits detected via semantic understanding of attack patterns.',
-    icon: Shield,
-    accent: '#00d4ff',
-    tags: ['8ms response', '99.99% accuracy'],
-    wide: true,
-  },
-  {
-    title: 'Predictive Risk Engine',
-    description:
-      'Graph neural networks map your attack surface and predict vulnerability exploitation paths 72 hours in advance.',
-    icon: BarChart3,
-    accent: '#a855f7',
-    tags: ['72h prediction', '94% precision'],
-    wide: false,
-  },
-  {
-    title: 'Neural Data Vault',
-    description:
-      'AI-powered data classification using natural language understanding. Neural encryption keys adapt dynamically.',
-    icon: Database,
-    accent: '#00ff88',
-    tags: ['Quantum-safe', 'Zero leaks'],
-    wide: false,
-  },
-  {
-    title: 'Autonomous Incident Response',
-    description:
-      'When breaches occur, our AI orchestrates the entire response — containment, forensics, recovery, and reporting — without waiting for human approval.',
+      'A tailored IR plan aligned to NIST SP 800-61: roles, playbooks, and escalation paths your team can actually run during a breach — not a template that sits unread.',
     icon: Zap,
     accent: '#c9a84c',
-    tags: ['12ms response', 'Full automation'],
+    tags: ['NIST SP 800-61', 'Deliverable: IR plan + playbook'],
     wide: true,
   },
   {
-    title: 'Behavioral Biometric AI',
+    title: 'Vulnerability Assessment',
     description:
-      'Neural networks build behavioral fingerprints for every user and device. Anomalies trigger instant AI verification protocols.',
-    icon: Fingerprint,
-    accent: '#ff3366',
-    tags: ['2.4M profiles', 'Real-time'],
-    wide: false,
-  },
-  {
-    title: 'AI Compliance Engine',
-    description:
-      'Our AI continuously monitors your infrastructure against GDPR, HIPAA, SOC 2, and ISO 27001 requirements.',
-    icon: FileCheck,
-    accent: '#00d4ff',
-    tags: ['Auto-reports', '100% compliant'],
-    wide: false,
-  },
-  {
-    title: 'Neural Deception',
-    description:
-      'AI-generated honeypots and decoy systems that evolve to match attacker sophistication. Waste attacker time on fake targets.',
+      'A scoped scan and manual review of your systems, with findings ranked by real-world exploitability, not just CVSS score alone.',
     icon: Bug,
     accent: '#a855f7',
-    tags: ['Active decoys', 'Adaptive'],
+    tags: ['Prioritized findings', 'Deliverable: report'],
     wide: false,
   },
   {
-    title: 'Federated Intelligence',
+    title: 'PCI DSS Compliance Readiness',
     description:
-      'Privacy-preserving ML across global networks. Threat insights shared across all client networks anonymously.',
+      'Gap assessment against PCI DSS SAQ A v4.0.1 for merchants handling card data, with a remediation checklist mapped to each requirement.',
+    icon: FileCheck,
+    accent: '#00d4ff',
+    tags: ['PCI DSS SAQ A v4.0.1', 'Deliverable: checklist'],
+    wide: false,
+  },
+  {
+    title: 'Data Protection & Access Audit',
+    description:
+      'Review of access controls and data handling against Kenya\'s Data Protection Act 2019, so client and employee data is handled lawfully.',
+    icon: Fingerprint,
+    accent: '#ff3366',
+    tags: ["Kenya DPA 2019", 'Deliverable: audit report'],
+    wide: false,
+  },
+  {
+    title: 'Network Hardening Review',
+    description:
+      'Configuration review of firewalls, network segmentation, and exposed services, with a prioritized hardening checklist your team can execute.',
+    icon: Shield,
+    accent: '#00d4ff',
+    tags: ['Config review', 'Deliverable: hardening checklist'],
+    wide: true,
+  },
+  {
+    title: 'LLM & AI Security Review',
+    description:
+      'Assessment of AI/LLM-integrated products against the OWASP LLM Top 10 (2025) — prompt injection, data leakage, and insecure output handling.',
     icon: Globe,
+    accent: '#a855f7',
+    tags: ['OWASP LLM Top 10 2025', 'Deliverable: findings report'],
+    wide: false,
+  },
+  {
+    title: 'Threat Intelligence Briefing',
+    description:
+      'A curated, sourced briefing on threats relevant to your sector — written for decision-makers, not just security teams.',
+    icon: BarChart3,
     accent: '#00ff88',
-    tags: ['Global mesh', 'Zero-trust'],
+    tags: ['Sourced & cited', 'Deliverable: briefing doc'],
+    wide: false,
+  },
+  {
+    title: 'Backup & Encryption Audit',
+    description:
+      'Review of backup recoverability and encryption-at-rest practices, so a ransomware event or hardware failure doesn\'t become a data-loss event too.',
+    icon: Database,
+    accent: '#00ff88',
+    tags: ['Recoverability tested', 'Deliverable: audit report'],
     wide: false,
   },
 ];
