@@ -1,23 +1,15 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { body, param, query, validationResult } from 'express-validator';
+import { body, param, validationResult } from 'express-validator';
 import db from '../db.js';
 import { config } from '../config.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
 
-// A precomputed bcrypt hash of a random value, used only so that login always
-// takes roughly the same amount of time whether or not the email exists —
-// otherwise a nonexistent email skips bcrypt.compare entirely and responds
-// noticeably faster than a wrong password, which leaks which emails are
-// registered.
 const DUMMY_HASH = '$2b$12$c.ByGOhklqTXtY6UiWrCieVW3v1ZsI5tlBj/MfE9V92LjUYa9iuHu';
 
-// Parses simple Go/Vercel-style durations ("8h", "15m", "1d") or a plain
-// number of seconds, into milliseconds — used so the login cookie's maxAge
-// always matches JWT_EXPIRES_IN instead of being hardcoded separately.
 function parseExpiryToMs(value, fallbackMs) {
   if (!value) return fallbackMs;
   const match = String(value).trim().match(/^(\d+)\s*(ms|s|m|h|d)?$/i);
@@ -30,6 +22,25 @@ function parseExpiryToMs(value, fallbackMs) {
 
 const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 8 * 60 * 60 * 1000);
 const VALID_STATUSES = ['new', 'read', 'archived'];
+
+async function logAudit({ adminEmail, action, targetTable, targetId, oldValue, newValue }) {
+  try {
+    await db.query(
+      `INSERT INTO audit_logs (admin_email, action, target_table, target_id, old_value, new_value)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        adminEmail,
+        action,
+        targetTable,
+        targetId,
+        oldValue ? JSON.stringify(oldValue) : null,
+        newValue ? JSON.stringify(newValue) : null,
+      ]
+    );
+  } catch (err) {
+    console.error('[audit] Failed to write audit log:', err.message);
+  }
+}
 
 router.post(
   '/login',
@@ -49,9 +60,6 @@ router.post(
       const result = await db.query('SELECT * FROM admin_users WHERE email = $1', [email]);
       const user = result.rows[0];
 
-      // Always run bcrypt.compare, even for a nonexistent user, against a
-      // dummy hash, so response timing doesn't reveal whether the email
-      // exists.
       const passwordMatches = await bcrypt.compare(password, user?.password_hash || DUMMY_HASH);
 
       if (!user || !passwordMatches) {
@@ -67,7 +75,7 @@ router.post(
       res.cookie('admin_token', token, {
         httpOnly: true,
         secure: config.isProduction,
-        sameSite: 'strict',
+        sameSite: 'lax',
         maxAge: COOKIE_MAX_AGE_MS,
       });
 
@@ -115,7 +123,11 @@ router.get('/submissions', authenticateToken, async (req, res) => {
     }
 
     if (req.query.search) {
-      params.push(`%${req.query.search}%`);
+      const search = String(req.query.search).trim();
+      if (search.length > 100) {
+        return res.status(400).json({ error: 'Search query too long (max 100 chars).' });
+      }
+      params.push(`%${search}%`);
       const idx = params.length;
       conditions.push(
         `(name ILIKE $${idx} OR email ILIKE $${idx} OR company ILIKE $${idx} OR message ILIKE $${idx})`
@@ -166,14 +178,26 @@ router.patch(
     }
 
     try {
+      const oldResult = await db.query('SELECT status FROM contacts WHERE id = $1', [req.params.id]);
+      const oldRow = oldResult.rows[0];
+      if (!oldRow) {
+        return res.status(404).json({ error: 'Submission not found.' });
+      }
+      const oldStatus = oldRow.status;
+
       const result = await db.query(
         'UPDATE contacts SET status = $1 WHERE id = $2 RETURNING id, status',
         [req.body.status, req.params.id]
       );
 
-      if (!result.rows[0]) {
-        return res.status(404).json({ error: 'Submission not found.' });
-      }
+      await logAudit({
+        adminEmail: req.user.email,
+        action: 'update_status',
+        targetTable: 'contacts',
+        targetId: Number(req.params.id),
+        oldValue: { status: oldStatus },
+        newValue: { status: req.body.status },
+      });
 
       res.json(result.rows[0]);
     } catch (err) {
@@ -194,13 +218,24 @@ router.delete(
     }
 
     try {
+      const oldResult = await db.query('SELECT * FROM contacts WHERE id = $1', [req.params.id]);
+      const oldRow = oldResult.rows[0];
+      if (!oldRow) {
+        return res.status(404).json({ error: 'Submission not found.' });
+      }
+
       const result = await db.query('DELETE FROM contacts WHERE id = $1 RETURNING id', [
         req.params.id,
       ]);
 
-      if (!result.rows[0]) {
-        return res.status(404).json({ error: 'Submission not found.' });
-      }
+      await logAudit({
+        adminEmail: req.user.email,
+        action: 'delete',
+        targetTable: 'contacts',
+        targetId: Number(req.params.id),
+        oldValue: oldRow,
+        newValue: null,
+      });
 
       res.status(204).end();
     } catch (err) {
