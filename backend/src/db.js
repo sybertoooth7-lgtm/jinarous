@@ -12,19 +12,22 @@ const pool = new Pool({
   connectionTimeoutMillis: 10000,
 });
 
-try {
-  await pool.query('SELECT 1');
-  console.log('[db] PostgreSQL connected');
-} catch (err) {
-  console.error('[db] FATAL:', err.message);
-  process.exit(1);
-}
-
-try {
-  await runMigrations(pool);
-} catch (err) {
-  console.error('[db] FATAL: migration failed:', err.message);
-  process.exit(1);
+export async function initDb(maxRetries = 5, delayMs = 2000) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      await pool.query('SELECT 1');
+      console.log('[db] PostgreSQL connected');
+      await runMigrations(pool);
+      return;
+    } catch (err) {
+      console.error(`[db] Connection attempt ${i + 1}/${maxRetries} failed: ${err.message}`);
+      if (i === maxRetries - 1) {
+        console.error('[db] FATAL: Could not connect to database after all retries.');
+        process.exit(1);
+      }
+      await new Promise(r => setTimeout(r, delayMs * Math.pow(2, i)));
+    }
+  }
 }
 
 export const db = {
