@@ -93,7 +93,7 @@ function formatDate(iso) {
   }
 }
 
-// --- Login ---------------------------------------------------------------
+// --- Login -----------------------------------------------------------
 
 els.loginForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -125,7 +125,7 @@ els.logoutBtn.addEventListener('click', () => {
   showLogin();
 });
 
-// --- Stats -----------------------------------------------------------------
+// --- Stats -----------------------------------------------------------
 
 async function loadStats() {
   try {
@@ -142,7 +142,7 @@ async function loadStats() {
   }
 }
 
-// --- Submissions table -----------------------------------------------------
+// --- Submissions table ------------------------------------------------
 
 async function loadSubmissions() {
   els.tableBody.innerHTML = `<tr><td colspan="7" class="empty">Loading…</td></tr>`;
@@ -255,7 +255,7 @@ els.statusFilter.addEventListener('change', (e) => {
   loadSubmissions();
 });
 
-// --- Tabs --------------------------------------------------------------
+// --- Tabs ------------------------------------------------------------
 
 els.tabBtns.forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -268,7 +268,7 @@ els.tabBtns.forEach((btn) => {
   });
 });
 
-// --- Tools: Access Control & Authentication Audit ---------------------
+// --- Tools: Access Control & Authentication Audit --------------------
 
 const LEVEL_ORDER = { FAIL: 0, WARN: 1, INFO: 2, PASS: 3 };
 
@@ -377,7 +377,7 @@ els.runsBody.addEventListener('click', async (e) => {
   }
 });
 
-// --- Init ------------------------------------------------------------------
+// --- Init ------------------------------------------------------------
 
 async function init() {
   if (!getToken()) {
