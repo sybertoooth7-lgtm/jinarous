@@ -1,42 +1,30 @@
-import jwt from 'jsonwebtoken';
-import { config } from '../config.js';
-import db from '../db.js';
+const jwt = require('jsonwebtoken');
+const { tokenBlocklist } = require('../routes/admin');
 
-export async function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  const cookieToken = req.cookies?.admin_token;
-  const finalToken = token || cookieToken;
-  const isBrowser = req.headers.accept?.includes('text/html');
+/**
+ * Authentication middleware
+ * Fix #2: Check token blocklist for revoked tokens
+ */
+function requireAuth(req, res, next) {
+  const token = req.cookies?.adminToken || req.headers.authorization?.replace('Bearer ', '');
 
-  if (!finalToken) {
-    if (isBrowser) return res.redirect('/admin/login.html');
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized: No token provided' });
   }
 
   try {
-    const decoded = jwt.verify(finalToken, config.jwtSecret);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (decoded.jti) {
-      const blockResult = await db.query(
-        'SELECT 1 FROM token_blocklist WHERE jti = $1',
-        [decoded.jti]
-      );
-      if (blockResult.rows.length > 0) {
-        throw new Error('Token revoked');
-      }
+    // Fix #2: Reject revoked tokens
+    if (decoded.jti && tokenBlocklist.has(decoded.jti)) {
+      return res.status(401).json({ error: 'Unauthorized: Token has been revoked' });
     }
 
     req.user = decoded;
     next();
   } catch (err) {
-    if (isBrowser) return res.redirect('/admin/login.html');
-    return res.status(403).json({ error: 'Invalid or expired token.' });
+    return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
   }
 }
 
-export function requireAdmin(req, res, next) {
-  authenticateToken(req, res, () => {
-    next();
-  });
-}
+module.exports = { requireAuth };
