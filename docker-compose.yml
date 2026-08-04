@@ -1,50 +1,99 @@
-version: "3.8"
+version: "3.9"
 
 services:
-  app:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: app-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-appuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-appdb}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appuser} -d ${POSTGRES_DB:-appdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-network
+
+  # Redis (for cluster-safe rate limiting)
+  redis:
+    image: redis:7-alpine
+    container_name: app-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-network
+
+  # Backend API
+  backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "4000:4000"
+    container_name: app-backend
+    restart: unless-stopped
     environment:
-      - NODE_ENV=production
-      - PORT=4000
-      - DB_PATH=/data/alux.db        # switch to PostgreSQL later; for now, persistent volume
-      - CORS_ORIGIN=${CORS_ORIGIN}
-      - JWT_SECRET=${JWT_SECRET}
-      - JWT_EXPIRES_IN=8h
-      - CLUSTER_MODE=true
-      - CONTACT_RATE_LIMIT_WINDOW_MINUTES=15
-      - CONTACT_RATE_LIMIT_MAX=5
-      - SENTRY_DSN=${SENTRY_DSN}
-      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL}
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      DATABASE_URL: postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-appdb}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      CLUSTER_MODE: ${CLUSTER_MODE:-false}
+      WORKERS: ${WORKERS:-2}
+    ports:
+      - "3001:3001"
     volumes:
-      - app-data:/data
+      - ./backend:/app:ro
+      - /app/node_modules
     depends_on:
-      - redis
-    restart: unless-stopped
-    deploy:
-      replicas: 2                    # horizontal scale; needs PostgreSQL to work safely
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
-  redis:
-    image: redis:7-alpine
+  # Frontend (optional — serves static build)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: app-frontend
     restart: unless-stopped
-    volumes:
-      - redis-data:/data
-
-  # Uncomment when you're ready to migrate from SQLite:
-  # postgres:
-  #   image: postgres:16-alpine
-  #   environment:
-  #     POSTGRES_USER: alux
-  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
-  #     POSTGRES_DB: alux_plaza
-  #   volumes:
-  #     - postgres-data:/var/lib/postgresql/data
-  #   restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - app-network
 
 volumes:
-  app-data:
-  redis-data:
-  # postgres-data:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge
