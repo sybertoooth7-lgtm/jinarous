@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { body, param, validationResult } from 'express-validator';
+import { randomUUID } from 'node:crypto';
 import db from '../db.js';
 import { config } from '../config.js';
 import { authenticateToken } from '../middleware/auth.js';
@@ -66,8 +67,9 @@ router.post(
         return res.status(401).json({ error: 'Invalid credentials.' });
       }
 
+      const jti = randomUUID();
       const token = jwt.sign(
-        { id: user.id, email: user.email },
+        { id: user.id, email: user.email, jti },
         config.jwtSecret,
         { expiresIn: config.jwtExpiresIn }
       );
@@ -86,6 +88,29 @@ router.post(
     }
   }
 );
+
+router.post('/logout', authenticateToken, async (req, res) => {
+  try {
+    const { jti, exp } = req.user;
+    if (jti && exp) {
+      await db.query(
+        `INSERT INTO token_blocklist (jti, expires_at)
+         VALUES ($1, to_timestamp($2))
+         ON CONFLICT (jti) DO NOTHING`,
+        [jti, exp]
+      );
+    }
+    res.clearCookie('admin_token', {
+      httpOnly: true,
+      secure: config.isProduction,
+      sameSite: 'lax',
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[admin] Logout error:', err);
+    res.status(500).json({ error: 'Logout failed.' });
+  }
+});
 
 router.get('/me', authenticateToken, (req, res) => {
   res.json({ id: req.user.id, email: req.user.email });
