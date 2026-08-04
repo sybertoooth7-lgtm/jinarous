@@ -1,6 +1,6 @@
 import readline from 'node:readline';
 import bcrypt from 'bcryptjs';
-import db from '../src/db.js';
+import db, { initDb } from '../src/db.js';
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -12,6 +12,11 @@ function question(prompt) {
 }
 
 async function main() {
+  // Initialize DB connection and migrations before prompting.
+  // This prevents the script from crashing immediately if
+  // PostgreSQL isn't ready yet.
+  await initDb();
+
   const email = await question('Admin email: ');
   const password = await question('Admin password: ');
   rl.close();
