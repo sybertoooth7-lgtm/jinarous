@@ -1,104 +1,33 @@
 import { useEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
-import {
-  Eye,
-  Brain,
-  Zap,
-  ShieldCheck,
-  RefreshCw,
-  Lock,
-} from 'lucide-react';
+import { Activity, Timer, Gauge, ShieldCheck, TrendingUp, Ban } from 'lucide-react';
 import { API_BASE } from '@/lib/api';
 
 gsap.registerPlugin(ScrollTrigger);
 
-interface LiveLayerStatus {
-  id: string;
-  metricLabel: string;
-  metricValue: string;
-  detail: string;
-  status: 'active' | 'idle';
+interface StatusResponse {
+  requestCount: number;
+  errorCount: number;
+  averageLatencyMs: number | null;
+  requestsPerSecond: number;
+  uptimeSeconds: number;
+  contactSuccessRate: number | null;
+  honeypotBlocked: number;
 }
 
-const defenseLayers = [
-  {
-    id: 'perception',
-    num: '01',
-    name: 'Perception AI',
-    color: '#00d4ff',
-    colorClass: 'border-alux-cyan/50 hover:border-alux-cyan/50',
-    icon: Eye,
-    description:
-      'Computer vision and NLP systems continuously monitor all data streams, endpoints, and user behaviors. AI reads logs like a human analyst — but 10,000x faster.',
-    fallbackLabel: 'Processing',
-    fallbackValue: '—',
-  },
-  {
-    id: 'cognition',
-    num: '02',
-    name: 'Cognition AI',
-    color: '#a855f7',
-    colorClass: 'border-alux-purple/50 hover:border-alux-purple/50',
-    icon: Brain,
-    description:
-      'Deep reasoning engines analyze threat context, intent, and potential impact. The AI understands "why" an attack is happening, not just "what".',
-    fallbackLabel: 'Submissions analyzed',
-    fallbackValue: '—',
-  },
-  {
-    id: 'decision',
-    num: '03',
-    name: 'Decision AI',
-    color: '#c9a84c',
-    colorClass: 'border-alux-gold/50 hover:border-alux-gold/50',
-    icon: Zap,
-    description:
-      'Reinforcement learning agents make split-second decisions on threat severity and response strategy. No human approval needed for 99.7% of incidents.',
-    fallbackLabel: 'Latency',
-    fallbackValue: '—',
-  },
-  {
-    id: 'action',
-    num: '04',
-    name: 'Action AI',
-    color: '#00ff88',
-    colorClass: 'border-alux-green/50 hover:border-alux-green/50',
-    icon: ShieldCheck,
-    description:
-      'Autonomous response execution — isolating systems, deploying patches, rerouting traffic, and activating countermeasures without human intervention.',
-    fallbackLabel: 'Success rate',
-    fallbackValue: '—',
-  },
-  {
-    id: 'evolution',
-    num: '05',
-    name: 'Evolution AI',
-    color: '#f97316',
-    colorClass: 'border-alux-orange/50 hover:border-alux-orange/50',
-    icon: RefreshCw,
-    description:
-      'Self-modifying defense algorithms that evolve after every encounter. The AI rewrites its own response strategies based on attack outcomes.',
-    fallbackLabel: 'Uptime',
-    fallbackValue: '—',
-  },
-  {
-    id: 'counter-ai',
-    num: '06',
-    name: 'Counter-AI',
-    color: '#ff3366',
-    colorClass: 'border-alux-red/50 hover:border-alux-red/50',
-    icon: Lock,
-    description:
-      'Adversarial AI that predicts attacker next moves and deploys deceptive countermeasures. Honeypots, fake credentials, and disinformation campaigns.',
-    fallbackLabel: 'Bots blocked',
-    fallbackValue: '—',
-  },
-];
+function formatUptime(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
 
 export default function DefenseMatrix() {
   const sectionRef = useRef<HTMLElement>(null);
-  const [liveStatus, setLiveStatus] = useState<Record<string, LiveLayerStatus>>({});
+  const [status, setStatus] = useState<StatusResponse | null>(null);
   const [isLive, setIsLive] = useState(false);
 
   useEffect(() => {
@@ -108,14 +37,9 @@ export default function DefenseMatrix() {
       try {
         const res = await fetch(`${API_BASE}/api/status/defense-matrix`);
         if (!res.ok) throw new Error('Status endpoint unavailable');
-        const data = await res.json();
+        const data: StatusResponse = await res.json();
         if (cancelled) return;
-
-        const byId: Record<string, LiveLayerStatus> = {};
-        for (const layer of data.layers) {
-          byId[layer.id] = layer;
-        }
-        setLiveStatus(byId);
+        setStatus(data);
         setIsLive(true);
       } catch {
         if (!cancelled) setIsLive(false);
@@ -151,6 +75,70 @@ export default function DefenseMatrix() {
     );
   }, []);
 
+  const metrics = [
+    {
+      id: 'uptime',
+      name: 'Backend Uptime',
+      color: '#00d4ff',
+      icon: Timer,
+      value: isLive && status ? formatUptime(status.uptimeSeconds) : '—',
+      description: 'How long the production backend has been running without restarting.',
+    },
+    {
+      id: 'requests',
+      name: 'Requests Handled',
+      color: '#a855f7',
+      icon: Activity,
+      value: isLive && status ? status.requestCount.toLocaleString() : '—',
+      description: 'Total requests served since deployment, read straight from the database.',
+    },
+    {
+      id: 'latency',
+      name: 'Average Latency',
+      color: '#c9a84c',
+      icon: Gauge,
+      value:
+        isLive && status
+          ? status.averageLatencyMs !== null
+            ? `${status.averageLatencyMs.toFixed(0)}ms`
+            : 'Warming up'
+          : '—',
+      description: 'Response time over recent requests to this backend instance.',
+    },
+    {
+      id: 'errors',
+      name: 'Error Rate',
+      color: '#00ff88',
+      icon: ShieldCheck,
+      value:
+        isLive && status
+          ? `${status.requestCount > 0 ? ((status.errorCount / status.requestCount) * 100).toFixed(2) : '0.00'}%`
+          : '—',
+      description: 'Share of requests that resulted in a server error, not a client mistake.',
+    },
+    {
+      id: 'contact-rate',
+      name: 'Contact Form Success',
+      color: '#f97316',
+      icon: TrendingUp,
+      value:
+        isLive && status && status.contactSuccessRate !== null
+          ? `${status.contactSuccessRate.toFixed(0)}%`
+          : isLive
+          ? 'No submissions yet'
+          : '—',
+      description: 'Share of contact form attempts that saved successfully.',
+    },
+    {
+      id: 'honeypot',
+      name: 'Bots Blocked',
+      color: '#ff3366',
+      icon: Ban,
+      value: isLive && status ? status.honeypotBlocked.toLocaleString() : '—',
+      description: 'Submissions caught by the hidden honeypot field on the contact form.',
+    },
+  ];
+
   return (
     <section
       ref={sectionRef}
@@ -164,27 +152,27 @@ export default function DefenseMatrix() {
             <span
               className={`w-2 h-2 rounded-full mr-2 ${isLive ? 'bg-alux-green animate-ping' : 'bg-alux-red animate-ping'}`}
             />
-            {isLive ? 'Live — Connected to Backend' : 'Autonomous Defense Protocols'}
+            {isLive ? 'Live — Connected to Backend' : 'Backend Unreachable'}
           </div>
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-serif font-bold text-white mb-6">
-            AI <span className="gradient-text-cyan">Defense Matrix</span>
+            Live <span className="gradient-text-cyan">System Status</span>
           </h2>
           <p className="text-[#94a3b8] text-lg max-w-2xl mx-auto">
-            Six autonomous AI defense layers working in concert. Each layer operates independently
-            yet shares intelligence across the neural network for coordinated threat response.
+            These numbers come straight from our production backend, refreshed every 8 seconds —
+            not a mockup. This is the same infrastructure we run for client work.
           </p>
         </div>
 
-        {/* Defense Cards Grid */}
+        {/* Metrics Grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {defenseLayers.map((layer, i) => (
+          {metrics.map((metric) => (
             <div
-              key={i}
-              className={`defense-card bg-navy-surface border rounded-2xl p-7 transition-all duration-300 hover:-translate-y-1 ${layer.colorClass}`}
+              key={metric.id}
+              className="defense-card bg-navy-surface border rounded-2xl p-7 transition-all duration-300 hover:-translate-y-1"
               style={{ borderColor: 'rgba(255,255,255,0.06)' }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.borderColor = `${layer.color}4D`;
-                (e.currentTarget as HTMLElement).style.boxShadow = `0 8px 32px ${layer.color}26`;
+                (e.currentTarget as HTMLElement).style.borderColor = `${metric.color}4D`;
+                (e.currentTarget as HTMLElement).style.boxShadow = `0 8px 32px ${metric.color}26`;
               }}
               onMouseLeave={(e) => {
                 (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.06)';
@@ -193,55 +181,21 @@ export default function DefenseMatrix() {
             >
               <div className="flex items-center gap-3 mb-4">
                 <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center ai-pulse"
+                  className="w-12 h-12 rounded-xl flex items-center justify-center"
                   style={{
-                    background: `linear-gradient(135deg, ${layer.color}, ${layer.color}99)`,
+                    background: `linear-gradient(135deg, ${metric.color}, ${metric.color}99)`,
                   }}
                 >
-                  <layer.icon className="w-6 h-6 text-white" />
+                  <metric.icon className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-serif font-semibold text-white">
-                    {layer.name}
-                  </h3>
-                  <span
-                    className="text-xs font-mono"
-                    style={{ color: layer.color }}
-                  >
-                    LAYER {layer.num}
+                  <h3 className="text-lg font-serif font-semibold text-white">{metric.name}</h3>
+                  <span className="text-2xl font-mono font-bold" style={{ color: metric.color }}>
+                    {metric.value}
                   </span>
                 </div>
               </div>
-              <p className="text-[#94a3b8] text-sm leading-relaxed mb-4">
-                {layer.description}
-              </p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-[#475569]">
-                  {liveStatus[layer.id]?.metricLabel ?? layer.fallbackLabel}:{' '}
-                  <span className="font-mono" style={{ color: layer.color }}>
-                    {isLive ? (liveStatus[layer.id]?.metricValue ?? layer.fallbackValue) : 'Offline'}
-                  </span>
-                </span>
-                <span
-                  className={`px-2 py-0.5 text-[10px] rounded-full font-mono ${
-                    !isLive || liveStatus[layer.id]?.status === 'idle'
-                      ? 'bg-[#475569]/10 text-[#94a3b8]'
-                      : 'bg-alux-green/10 text-alux-green'
-                  }`}
-                >
-                  {/* Previously defaulted to ACTIVE/green whenever the backend was
-                      unreachable (liveStatus[layer.id]?.status was simply undefined,
-                      which !== 'idle', so the ACTIVE branch fired) - showing a
-                      reassuring green badge next to blank data, which looked broken
-                      and was actively misleading about real system status. */}
-                  {!isLive ? 'OFFLINE' : liveStatus[layer.id]?.status === 'idle' ? 'IDLE' : 'ACTIVE'}
-                </span>
-              </div>
-              {isLive && liveStatus[layer.id]?.detail && (
-                <p className="text-[10px] text-[#475569] mt-2 font-mono">
-                  {liveStatus[layer.id].detail}
-                </p>
-              )}
+              <p className="text-[#94a3b8] text-sm leading-relaxed">{metric.description}</p>
             </div>
           ))}
         </div>
