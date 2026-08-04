@@ -1,42 +1,72 @@
-WHERE EACH FILE GOES — round 2 (admin dashboard fix)
-======================================================
+WHERE EACH FILE GOES — round 3 (killing the remaining fictional AI copy)
+==========================================================================
 
-  outputs/backend/migrations/004_add_contact_details_and_status.sql
-    -> backend/migrations/004_add_contact_details_and_status.sql
-    NEW FILE — create it, don't replace anything. Runs automatically on
-    next deploy; adds first_name/last_name/company/status columns to
-    `contacts` and backfills existing rows.
+FRONTEND (all replace existing files at these paths):
+  outputs/frontend/src/sections/AICore.tsx        -> frontend/src/sections/AICore.tsx
+  outputs/frontend/src/sections/DefenseMatrix.tsx -> frontend/src/sections/DefenseMatrix.tsx
+  outputs/frontend/src/sections/NeuralLab.tsx     -> frontend/src/sections/NeuralLab.tsx
+  outputs/frontend/src/sections/CTA.tsx           -> frontend/src/sections/CTA.tsx
+  outputs/frontend/src/sections/Navigation.tsx    -> frontend/src/sections/Navigation.tsx
+  outputs/frontend/src/sections/Footer.tsx        -> frontend/src/sections/Footer.tsx
+  outputs/frontend/src/sections/Contact.tsx       -> frontend/src/sections/Contact.tsx
+    (only the submit button text changed here since last time — it still
+    said "Initialize Neural Shield")
 
-  outputs/backend/src/routes/admin.js   -> backend/src/routes/admin.js
-    Adds GET /me, GET /stats, PATCH /submissions/:id/status,
-    DELETE /submissions/:id. Fixes /submissions to support status/search
-    filters and `pageSize` (was `limit`), and to return a flat `total`
-    (the dashboard JS expected this, not the old nested `pagination.total`).
-    Also fixes the login cookie's maxAge to track JWT_EXPIRES_IN instead of
-    a hardcoded 8h, and normalizes login timing so a wrong password and a
-    nonexistent email both take about the same time to respond.
+BACKEND:
+  outputs/backend/src/routes/status.js -> backend/src/routes/status.js
+    IMPORTANT CHANGE: this route no longer requires an admin token. It was
+    behind authenticateToken, but it's only ever called by anonymous
+    visitors on the public homepage (DefenseMatrix.tsx) — so in practice
+    every real visitor's request 401'd, the fetch failed, and the section
+    silently fell back to showing "Offline". It's public now on purpose;
+    none of the fields it returns are sensitive (aggregate request/error
+    counts, latency, uptime — no user data).
 
-  outputs/backend/src/routes/contact.js   -> backend/src/routes/contact.js
-    Now accepts firstName/lastName/company separately (was: a single
-    combined `name`, and `company` was silently thrown away).
+WHAT CHANGED, section by section
+---------------------------------
+- AICore.tsx: was "Neural Network Architecture" / "Transformer Sentinel" /
+  "Graph Neural Defender" / "Reinforcement Agent" with fabricated progress-
+  bar percentages. Now "Our Methodology" with three real pillars (standards
+  assessment, attack path mapping, continuous review), tagged with the
+  actual standards used instead of made-up numbers.
 
-  outputs/backend/src/lib/email.js   -> backend/src/lib/email.js
-    Notification email now includes the company name when provided.
+- DefenseMatrix.tsx: this was the biggest functional bug, not just a
+  copy problem. It expected the backend to return a `layers` array keyed
+  to 6 fictional "AI layers" (Perception AI, Cognition AI, etc.) — but the
+  real backend has never returned that shape. Combined with the auth
+  requirement, this section could NEVER actually go live for a real
+  visitor; it always silently fell back to fake "Offline" styling. Rewired
+  to match what the backend actually returns: uptime, request count,
+  latency, error rate, contact form success rate, honeypot catches. This
+  is now a real, working "our production system, live" section.
 
-  outputs/backend/src/db.js   -> backend/src/db.js
-    Migration failures now log a clean "[db] FATAL: migration failed: ..."
-    message and exit, instead of an unhandled-rejection stack trace.
+- NeuralLab.tsx: was "AI Research Laboratory" with a fake "99.999% Neural
+  Uptime" stat and other fabricated percentages. Now "Research &
+  Methodology" listing real focus areas (post-quantum readiness, LLM
+  security review, threat intel, honeypot monitoring) and an honest
+  checklist of which standard backs which deliverable — no invented
+  numbers.
 
-  outputs/frontend/src/sections/Contact.tsx   -> frontend/src/sections/Contact.tsx
-    Sends firstName/lastName/company separately to match the updated
-    backend, instead of combining them into one `name` field and dropping
-    company on the floor.
+- CTA.tsx: dropped a fabricated US toll-free number ("1-800-ALUX-AI") that
+  was never real, and "Activate Your AI Defense" copy. Second button now
+  scrolls to Services instead of linking a fake phone number.
+
+- Navigation.tsx: nav labels renamed to match the honest section content
+  (same anchor IDs, so nothing else needs to change). Both CTA buttons
+  now say "Book a Consultation" instead of "Activate Neural Shield".
+
+- Footer.tsx: fixed the tagline ("AI-native enterprise security... neural
+  networks... autonomous intelligence") and a "Powered by Neural Shield
+  v5.0" badge in the bottom bar. Also bumped the stale "© 2025" to 2026
+  while in there.
+
+- Contact.tsx: the actual submit button still said "Initialize Neural
+  Shield" — now says "Send Message".
 
 TESTING NOTE
 ------------
-All of the above was tested end-to-end against a real local PostgreSQL
-instance: login, /me, /stats, contact submission (with company), search,
-status filtering, PATCH status, DELETE, wrong-password / unknown-email
-login attempts, and invalid-status rejection all verified working via
-actual HTTP requests — not just read over. Frontend was rebuilt with
-`npm run build` afterward with no errors.
+Ran a full sweep against the actual built JS bundle (`npm run build` +
+grep) for every fictional phrase across all files — zero matches. Also
+started the backend against a real local Postgres and confirmed
+GET /api/status/defense-matrix now returns real 200 JSON with no
+Authorization header sent at all, matching what DefenseMatrix.tsx expects.
