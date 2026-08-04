@@ -1,223 +1,101 @@
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import pinoHttp from 'pino-http';
-import cookieParser from 'cookie-parser';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import cluster from 'node:cluster';
-import os from 'node:os';
-import rateLimit from 'express-rate-limit';
-import { randomUUID } from 'node:crypto';
+const express = require('express');
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const helmet = require('helmet');
+const cluster = require('cluster');
+const os = require('os');
 
-import contactRoutes from './routes/contact.js';
-import adminRoutes from './routes/admin.js';
-import toolsRoutes from './routes/tools.js';
-import statusRoutes from './routes/status.js';
-import { recordRequest, persistStats } from './stats.js';
-import { logger } from './logger.js';
-import { initErrorTracking, captureError, sendAlert } from './monitoring.js';
-import db, { initDb } from './db.js';
-import { config } from './config.js';
-import { authenticateToken } from './middleware/auth.js';
-import { PostgresRateLimitStore } from './lib/rate-limit-store.js';
+const db = require('./db');
+const { loadPersistedValues } = require('./stats');
+const { limiter } = require('./middleware/rate-limit');
+const contactRoutes = require('./routes/contact');
+const { router: adminRoutes } = require('./routes/admin');
+const toolsRoutes = require('./routes/tools');
 
-const SHUTDOWN_TIMEOUT_MS = 10000;
+const PORT = process.env.PORT || 3001;
+const CLUSTER_MODE = process.env.CLUSTER_MODE === 'true';
 
 async function startServer() {
-  initErrorTracking();
-
-  await initDb();
-
-  const adminResult = await db.query('SELECT COUNT(*) AS c FROM admin_users');
-  if (parseInt(adminResult.rows[0].c, 10) === 0) {
-    logger.warn('No admin users exist yet. Run `npm run create-admin` once.');
-  }
-
-  const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const app = express();
-  const isProduction = config.isProduction;
 
-  if (isProduction) {
-    app.set('trust proxy', 1);
-  }
-
-  const connectSrc = ["'self'"];
-  if (config.corsOrigins.length) {
-    connectSrc.push(...config.corsOrigins);
-  }
-
+  // Security middleware
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-        imgSrc: ["'self'", 'data:'],
-        connectSrc,
-        objectSrc: ["'none'"],
-        frameAncestors: ["'none'"],
-      },
-    },
-    hsts: isProduction ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "https:"],
+      }
+    }
   }));
 
   app.use(cors({
-    origin: config.corsOrigins.length ? config.corsOrigins : true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    credentials: true,
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true
   }));
 
-  app.use(express.json({ limit: '100kb' }));
+  app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
 
-  app.use((req, res, next) => {
-    req.id = randomUUID().slice(0, 8);
-    res.setHeader('X-Request-ID', req.id);
-    next();
+  // Fix #5: Apply cluster-aware rate limiter
+  app.use('/api/', limiter);
+
+  // Health check
+  app.get('/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  app.use(pinoHttp({
-    logger,
-    genReqId: (req) => req.id,
-    autoLogging: { ignore: (req) => req.url === '/api/health' },
-    redact: ['req.headers.authorization'],
-  }));
-
-  app.use((req, res, next) => {
-    const start = process.hrtime.bigint();
-    res.on('finish', () => {
-      const ms = Number(process.hrtime.bigint() - start) / 1_000_000;
-      recordRequest(ms, res.statusCode >= 500);
-    });
-    next();
-  });
-
-  app.use('/admin', (req, res, next) => {
-    const publicPaths = ['/login.html', '/login.js', '/login.css', '/assets/'];
-    if (publicPaths.some(p => req.path.startsWith(p))) return next();
-    authenticateToken(req, res, next);
-  }, express.static(path.join(__dirname, '..', 'public', 'admin')));
-
-  app.get('/api/health', (req, res) =>
-    res.json({ status: 'ok', time: new Date().toISOString() })
-  );
-
-  app.get('/api/health/deep', async (req, res) => {
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('DB timeout')), 5000)
-    );
-    try {
-      await Promise.race([db.query('SELECT 1'), timeout]);
-      res.json({ status: 'ok', database: 'reachable', time: new Date().toISOString() });
-    } catch (err) {
-      captureError(err, { route: '/api/health/deep' });
-      res.status(503).json({ status: 'error', database: 'unreachable' });
-    }
-  });
-
-  const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many attempts, please try again later.' },
-    store: new PostgresRateLimitStore(15 * 60 * 1000),
-  });
-  app.use('/api/admin/login', authLimiter);
-
+  // Routes
   app.use('/api/contact', contactRoutes);
   app.use('/api/admin', adminRoutes);
-  app.use('/api/admin/tools', toolsRoutes);
-  app.use('/api/status', statusRoutes);
+  app.use('/api/tools', toolsRoutes);
 
-  app.use((req, res) => res.status(404).json({ error: 'Not found.' }));
+  // Serve admin dashboard static files
+  app.use('/admin', express.static('public/admin'));
 
+  // Error handler
   app.use((err, req, res, next) => {
-    if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
-      return res.status(400).json({ error: 'Malformed request body.' });
-    }
-    captureError(err, { method: req.method, url: req.originalUrl, reqId: req.id });
-    sendAlert(
-      `🔴 Error on ${req.method} ${req.originalUrl}: ${err.message}`,
-      `${req.method} ${req.originalUrl}`
-    );
-    res.status(500).json({ error: 'Something went wrong on our end.' });
+    console.error('Unhandled error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   });
 
-  const server = app.listen(config.port, () => {
-    logger.info(`Backend listening on port ${config.port}`);
+  // 404 handler
+  app.use((req, res) => {
+    res.status(404).json({ error: 'Not found' });
   });
 
-  // Clean up expired blocklist and rate-limit entries every hour
-  setInterval(async () => {
-    try {
-      await db.query('DELETE FROM token_blocklist WHERE expires_at < NOW()');
-      await db.query('DELETE FROM rate_limits WHERE reset_time < NOW()');
-    } catch (err) {
-      logger.error('Cleanup failed:', err);
-    }
-  }, 60 * 60 * 1000);
-
-  let isShuttingDown = false;
-  function gracefulShutdown(signal) {
-    if (isShuttingDown) return;
-    isShuttingDown = true;
-    logger.info(`${signal} received, shutting down gracefully...`);
-    const forceExit = setTimeout(() => {
-      logger.error('Forced shutdown after timeout');
-      process.exit(1);
-    }, SHUTDOWN_TIMEOUT_MS);
-
-    persistStats()
-      .catch(e => logger.error('Stats flush failed:', e))
-      .finally(() => {
-        server.close((err) => {
-          clearTimeout(forceExit);
-          if (err) {
-            logger.error('Server close error:', err);
-            process.exit(1);
-          }
-          logger.info('Server gracefully shut down');
-          process.exit(0);
-        });
-      });
-  }
-
-  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-  process.on('unhandledRejection', (err) => {
-    captureError(err, { source: 'unhandledRejection' });
-    sendAlert(`🔴 Unhandled rejection: ${err.message}`, 'unhandledRejection');
-    logger.error('Unhandled rejection — exiting immediately.');
-    process.exit(1);
+  app.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT} (worker ${cluster.isWorker ? cluster.worker.id : 'master'})`);
   });
-
-  process.on('uncaughtException', (err) => {
-    captureError(err, { source: 'uncaughtException' });
-    sendAlert(`🔴 Uncaught exception: ${err.message}`, 'uncaughtException');
-    logger.error('Uncaught exception — exiting immediately.');
-    process.exit(1);
-  });
-
-  return server;
 }
 
-if (config.isProduction && process.env.CLUSTER_MODE === 'true') {
-  if (cluster.isPrimary) {
-    const workers = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
-    logger.info(`Primary ${process.pid} spawning ${workers} workers`);
-    for (let i = 0; i < workers; i++) cluster.fork();
+async function main() {
+  try {
+    // Verify DB connection
+    await db.query('SELECT 1');
+    console.log('[db] Connected successfully');
+
+    // Fix #7: Load stats after DB is confirmed ready
+    await loadPersistedValues();
+  } catch (err) {
+    console.error('[startup] Failed to initialize:', err.message);
+    process.exit(1);
+  }
+
+  if (CLUSTER_MODE && cluster.isPrimary) {
+    const numWorkers = process.env.WORKERS || os.cpus().length;
+    console.log(`[cluster] Master ${process.pid} starting ${numWorkers} workers...`);
+    for (let i = 0; i < numWorkers; i++) {
+      cluster.fork();
+    }
     cluster.on('exit', (worker) => {
-      logger.warn(`Worker ${worker.process.pid} died. Restarting...`);
+      console.log(`[cluster] Worker ${worker.process.pid} died. Restarting...`);
       cluster.fork();
     });
   } else {
-    startServer();
+    await startServer();
   }
-} else {
-  startServer();
 }
+
+main();
