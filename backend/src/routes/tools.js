@@ -5,18 +5,15 @@ const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
-/**
- * Fix #9: Strict path validation to prevent shell injection
- * Only allows safe characters: alphanumeric, dash, underscore, dot, forward slash
- */
-const SAFE_PATH_REGEX = /^[a-zA-Z0-9_\-\/\.]+$/;
+// Negative lookahead rejects any string containing '..'
+const SAFE_PATH_REGEX = /^(?!.*\.\.)[a-zA-Z0-9_\-\/\.]+$/;
 
 router.post('/run', requireAuth, [
   body('loginPath')
     .trim()
     .notEmpty()
     .matches(SAFE_PATH_REGEX)
-    .withMessage('Invalid path format. Only alphanumeric, -, _, /, . allowed.')
+    .withMessage('Invalid path format. Path traversal (..) and special characters are not allowed.')
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -39,9 +36,9 @@ router.post('/run', requireAuth, [
 
     child.on('close', (code) => {
       if (code !== 0) {
-        return res.status(500).json({ 
-          error: 'Tool execution failed', 
-          stderr: stderr.trim() 
+        return res.status(500).json({
+          error: 'Tool execution failed',
+          stderr: stderr.trim()
         });
       }
       res.json({ success: true, output: stdout.trim() });
