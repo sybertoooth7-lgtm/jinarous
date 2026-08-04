@@ -120,7 +120,12 @@ els.loginForm.addEventListener('submit', async (e) => {
   }
 });
 
-els.logoutBtn.addEventListener('click', () => {
+els.logoutBtn.addEventListener('click', async () => {
+  try {
+    await apiFetch('/logout', { method: 'POST' });
+  } catch {
+    // ignore — token may already be invalid
+  }
   setToken(null);
   showLogin();
 });
