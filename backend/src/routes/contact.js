@@ -19,11 +19,11 @@ router.post(
   '/',
   contactLimiter,
   [
-    body('firstName').trim().isLength({ min: 1, max: 100 }).escape(),
-    body('lastName').trim().isLength({ min: 1, max: 100 }).escape(),
-    body('company').optional({ checkFalsy: true }).trim().isLength({ max: 150 }).escape(),
+    body('firstName').trim().isLength({ min: 1, max: 100 }),
+    body('lastName').trim().isLength({ min: 1, max: 100 }),
+    body('company').optional({ checkFalsy: true }).trim().isLength({ max: 150 }),
     body('email').trim().isEmail().normalizeEmail().isLength({ max: 255 }),
-    body('message').trim().isLength({ min: 1, max: 5000 }).escape(),
+    body('message').trim().isLength({ min: 1, max: 5000 }),
     body('honeypot').optional({ checkFalsy: true }).trim(),
   ],
   async (req, res) => {
