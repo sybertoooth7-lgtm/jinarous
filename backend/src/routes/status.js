@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import { authenticateToken } from '../middleware/auth.js';
 import {
   getUptimeSeconds,
   getAverageLatencyMs,
@@ -9,7 +8,11 @@ import {
 
 const router = Router();
 
-router.get('/defense-matrix', authenticateToken, async (req, res) => {
+// Intentionally public/unauthenticated: this powers the "live system status"
+// section on the public marketing site, viewed by anonymous visitors who
+// have no admin token. None of these fields are sensitive — aggregate
+// request/error counts, latency, and uptime, nothing user-identifying.
+router.get('/defense-matrix', async (req, res) => {
   // Cumulative counters come from the database so the number reflects the
   // whole cluster's traffic, not just whichever worker happened to handle
   // this request. Latency/throughput stay per-instance since they describe
