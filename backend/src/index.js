@@ -21,6 +21,7 @@ import { initErrorTracking, captureError, sendAlert } from './monitoring.js';
 import db, { initDb } from './db.js';
 import { config } from './config.js';
 import { authenticateToken } from './middleware/auth.js';
+import { PostgresRateLimitStore } from './lib/rate-limit-store.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10000;
 
@@ -123,6 +124,7 @@ async function startServer() {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many attempts, please try again later.' },
+    store: new PostgresRateLimitStore(15 * 60 * 1000),
   });
   app.use('/api/admin/login', authLimiter);
 
@@ -148,6 +150,16 @@ async function startServer() {
   const server = app.listen(config.port, () => {
     logger.info(`Backend listening on port ${config.port}`);
   });
+
+  // Clean up expired blocklist and rate-limit entries every hour
+  setInterval(async () => {
+    try {
+      await db.query('DELETE FROM token_blocklist WHERE expires_at < NOW()');
+      await db.query('DELETE FROM rate_limits WHERE reset_time < NOW()');
+    } catch (err) {
+      logger.error('Cleanup failed:', err);
+    }
+  }, 60 * 60 * 1000);
 
   let isShuttingDown = false;
   function gracefulShutdown(signal) {
