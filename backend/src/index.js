@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import cluster from 'node:cluster';
 import os from 'node:os';
 import rateLimit from 'express-rate-limit';
+import { randomUUID } from 'node:crypto';
 
 import contactRoutes from './routes/contact.js';
 import adminRoutes from './routes/admin.js';
@@ -17,7 +18,7 @@ import statusRoutes from './routes/status.js';
 import { recordRequest, persistStats } from './stats.js';
 import { logger } from './logger.js';
 import { initErrorTracking, captureError, sendAlert } from './monitoring.js';
-import db from './db.js';
+import db, { initDb } from './db.js';
 import { config } from './config.js';
 import { authenticateToken } from './middleware/auth.js';
 
@@ -25,6 +26,8 @@ const SHUTDOWN_TIMEOUT_MS = 10000;
 
 async function startServer() {
   initErrorTracking();
+
+  await initDb();
 
   const adminResult = await db.query('SELECT COUNT(*) AS c FROM admin_users');
   if (parseInt(adminResult.rows[0].c, 10) === 0) {
@@ -48,8 +51,8 @@ async function startServer() {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", 'https://fonts.googleapis.com'],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
         fontSrc: ["'self'", 'https://fonts.gstatic.com'],
         imgSrc: ["'self'", 'data:'],
         connectSrc,
@@ -62,15 +65,22 @@ async function startServer() {
 
   app.use(cors({
     origin: config.corsOrigins.length ? config.corsOrigins : true,
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
   }));
 
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
 
+  app.use((req, res, next) => {
+    req.id = randomUUID().slice(0, 8);
+    res.setHeader('X-Request-ID', req.id);
+    next();
+  });
+
   app.use(pinoHttp({
     logger,
+    genReqId: (req) => req.id,
     autoLogging: { ignore: (req) => req.url === '/api/health' },
     redact: ['req.headers.authorization'],
   }));
@@ -109,11 +119,10 @@ async function startServer() {
 
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 10,
+    max: 5,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many attempts, please try again later.' },
-    skipSuccessfulRequests: true,
   });
   app.use('/api/admin/login', authLimiter);
 
@@ -128,7 +137,7 @@ async function startServer() {
     if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
       return res.status(400).json({ error: 'Malformed request body.' });
     }
-    captureError(err, { method: req.method, url: req.originalUrl });
+    captureError(err, { method: req.method, url: req.originalUrl, reqId: req.id });
     sendAlert(
       `🔴 Error on ${req.method} ${req.originalUrl}: ${err.message}`,
       `${req.method} ${req.originalUrl}`
