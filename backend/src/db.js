@@ -20,7 +20,12 @@ try {
   process.exit(1);
 }
 
-await runMigrations(pool);
+try {
+  await runMigrations(pool);
+} catch (err) {
+  console.error('[db] FATAL: migration failed:', err.message);
+  process.exit(1);
+}
 
 export const db = {
   query(sql, params) {
