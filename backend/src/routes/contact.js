@@ -19,7 +19,9 @@ router.post(
   '/',
   contactLimiter,
   [
-    body('name').trim().isLength({ min: 1, max: 100 }).escape(),
+    body('firstName').trim().isLength({ min: 1, max: 100 }).escape(),
+    body('lastName').trim().isLength({ min: 1, max: 100 }).escape(),
+    body('company').optional({ checkFalsy: true }).trim().isLength({ max: 150 }).escape(),
     body('email').trim().isEmail().normalizeEmail().isLength({ max: 255 }),
     body('message').trim().isLength({ min: 1, max: 5000 }).escape(),
     body('honeypot').optional({ checkFalsy: true }).trim(),
@@ -37,19 +39,20 @@ router.post(
       return res.status(200).json({ success: true });
     }
 
-    const { name, email, message } = req.body;
+    const { firstName, lastName, company, email, message } = req.body;
+    const name = `${firstName} ${lastName}`.trim();
 
     try {
       const result = await db.query(
-        `INSERT INTO contacts (name, email, message, created_at)
-         VALUES ($1, $2, $3, NOW())
+        `INSERT INTO contacts (name, first_name, last_name, company, email, message, status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'new', NOW())
          RETURNING id`,
-        [name, email, message]
+        [name, firstName, lastName, company || null, email, message]
       );
 
       recordContactSuccess();
 
-      sendContactNotification({ name, email, message, id: result.rows[0].id }).catch(err => {
+      sendContactNotification({ name, company, email, message, id: result.rows[0].id }).catch(err => {
         console.error('[email] Notification failed:', err.message);
       });
 
