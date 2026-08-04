@@ -9,35 +9,35 @@ const researchItems = [
   {
     num: '01',
     color: '#a855f7',
-    title: 'Adversarial AI Defense',
-    description: 'Training neural networks to resist adversarial attacks on AI systems themselves.',
+    title: 'Post-Quantum Readiness',
+    description: 'Assessing exposure to "harvest now, decrypt later" risk and readiness for post-quantum cryptography migration.',
   },
   {
     num: '02',
     color: '#00d4ff',
-    title: 'Quantum Neural Cryptography',
-    description: 'Post-quantum encryption schemes powered by neural key generation algorithms.',
+    title: 'LLM & AI Security Review',
+    description: 'Applying the OWASP LLM Top 10 (2025) to products that integrate AI or LLM features.',
   },
   {
     num: '03',
     color: '#00ff88',
-    title: 'Federated Threat Intelligence',
-    description: 'Privacy-preserving ML across global networks without centralizing sensitive data.',
+    title: 'Threat Intelligence Briefings',
+    description: 'Curated, sourced threat intelligence relevant to businesses operating in Kenya and East Africa.',
   },
   {
     num: '04',
     color: '#f97316',
-    title: 'Neural Deception Engines',
-    description: 'AI-generated honeypots and decoy systems that evolve to match attacker sophistication.',
+    title: 'Honeypot & Deception Monitoring',
+    description: 'Deploying decoy systems and monitoring them to study real attacker behavior against our own infrastructure.',
   },
 ];
 
-const metrics = [
-  { label: 'Threat Detection (Transformer)', value: '99.99%', gradient: 'from-alux-cyan to-alux-green', width: '99.99%' },
-  { label: 'False Positive Rate (GNN)', value: '99.9%', gradient: 'from-alux-purple to-alux-cyan', width: '99.9%' },
-  { label: 'Response Time (RL Agent)', value: '98%', gradient: 'from-alux-green to-alux-cyan', width: '98%' },
-  { label: 'Prediction Accuracy (72h)', value: '94.3%', gradient: 'from-alux-orange to-alux-gold', width: '94.3%' },
-  { label: 'Neural Uptime', value: '99.999%', gradient: 'from-alux-gold to-alux-green', width: '99.999%' },
+const methodologies = [
+  { label: 'Incident Response', standard: 'NIST SP 800-61' },
+  { label: 'Compliance Readiness', standard: 'PCI DSS SAQ A v4.0.1' },
+  { label: 'Data Protection Audit', standard: "Kenya's DPA 2019" },
+  { label: 'LLM Security Review', standard: 'OWASP LLM Top 10 2025' },
+  { label: 'Vulnerability Assessment', standard: 'Documented methodology' },
 ];
 
 export default function NeuralLab() {
@@ -115,14 +115,14 @@ export default function NeuralLab() {
         <div className="text-center mb-16">
           <div className="inline-flex items-center px-4 py-2 rounded-full bg-alux-cyan/10 border border-alux-cyan/20 text-alux-cyan text-sm font-medium mb-4">
             <FlaskConical className="w-4 h-4 mr-2" />
-            AI Research Laboratory
+            Research & Methodology
           </div>
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-serif font-bold text-white mb-6">
-            Inside the <span className="gradient-text-cyan">Neural Lab</span>
+            What We're <span className="gradient-text-cyan">Working On</span>
           </h2>
           <p className="text-[#94a3b8] text-lg max-w-2xl mx-auto">
-            Our AI research division pushes the boundaries of autonomous cybersecurity. From
-            adversarial machine learning to quantum-resistant neural cryptography.
+            The focus areas behind our service offerings, and the standards each deliverable is
+            actually built against.
           </p>
         </div>
 
@@ -157,30 +157,29 @@ export default function NeuralLab() {
             </div>
           </div>
 
-          {/* AI Performance Metrics */}
+          {/* Documented Methodologies */}
           <div className="lab-right glass-effect-cyan rounded-2xl p-8">
             <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-alux-green" />
-              AI Performance Metrics
+              Documented Methodologies
             </h3>
-            <div className="space-y-6">
-              {metrics.map((metric, i) => (
-                <div key={i}>
-                  <div className="flex justify-between text-sm mb-2">
-                    <span className="text-[#94a3b8]">{metric.label}</span>
-                    <span className="text-alux-cyan font-mono">{metric.value}</span>
-                  </div>
-                  <div className="h-2 bg-white/[0.06] rounded-full overflow-hidden relative">
-                    <div
-                      className={`h-full bg-gradient-to-r ${metric.gradient} rounded-full relative`}
-                      style={{ width: metric.width }}
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-shimmer" />
-                    </div>
-                  </div>
+            <div className="space-y-4">
+              {methodologies.map((m, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between p-4 rounded-lg bg-white/[0.03] border border-white/[0.06]"
+                >
+                  <span className="text-white text-sm font-medium">{m.label}</span>
+                  <span className="text-alux-cyan font-mono text-xs px-3 py-1 rounded-full bg-alux-cyan/10 border border-alux-cyan/20">
+                    {m.standard}
+                  </span>
                 </div>
               ))}
             </div>
+            <p className="text-[#475569] text-xs mt-6">
+              Every deliverable is checked against a written methodology document, not produced
+              ad hoc — ask for the methodology behind any service before you book it.
+            </p>
           </div>
         </div>
       </div>
