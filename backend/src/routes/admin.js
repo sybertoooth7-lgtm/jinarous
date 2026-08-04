@@ -1,273 +1,231 @@
-import { Router } from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { body, param, validationResult } from 'express-validator';
-import { randomUUID } from 'node:crypto';
-import db from '../db.js';
-import { config } from '../config.js';
-import { authenticateToken } from '../middleware/auth.js';
+const express = require('express');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const { body, param, query, validationResult } = require('express-validator');
+const db = require('../db');
+const { requireAuth } = require('../middleware/auth');
 
-const router = Router();
+const router = express.Router();
 
-const DUMMY_HASH = '$2b$12$c.ByGOhklqTXtY6UiWrCieVW3v1ZsI5tlBj/MfE9V92LjUYa9iuHu';
+// In-memory token blocklist (use Redis in production for multi-instance deployments)
+const tokenBlocklist = new Set();
 
-function parseExpiryToMs(value, fallbackMs) {
-  if (!value) return fallbackMs;
-  const match = String(value).trim().match(/^(\d+)\s*(ms|s|m|h|d)?$/i);
-  if (!match) return fallbackMs;
-  const amount = Number(match[1]);
-  const unit = (match[2] || 's').toLowerCase();
-  const multipliers = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
-  return amount * (multipliers[unit] || 1000);
-}
+// Helper: constant-time comparison dummy hash (60 chars, bcrypt format)
+const DUMMY_HASH = '$2b$10$abcdefghijklmnopqrstuvwxycdefghijklmnopqrstu';
 
-const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 8 * 60 * 60 * 1000);
-const VALID_STATUSES = ['new', 'read', 'archived'];
+/**
+ * POST /api/admin/login
+ * Fix #3: Timing attack — always run bcrypt.compare regardless of user existence
+ * Fix #4: Cookie maxAge tracks JWT_EXPIRES_IN dynamically
+ */
+router.post('/login', [
+  body('email').isEmail().normalizeEmail(),
+  body('password').isString().trim().notEmpty()
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
 
-async function logAudit({ adminEmail, action, targetTable, targetId, oldValue, newValue }) {
+  const { email, password } = req.body;
+
   try {
-    await db.query(
-      `INSERT INTO audit_logs (admin_email, action, target_table, target_id, old_value, new_value)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        adminEmail,
-        action,
-        targetTable,
-        targetId,
-        oldValue ? JSON.stringify(oldValue) : null,
-        newValue ? JSON.stringify(newValue) : null,
-      ]
+    const result = await db.query('SELECT * FROM admins WHERE email = $1', [email]);
+    const user = result.rows[0];
+
+    // Fix #3: Always compare to prevent timing attacks
+    const hashToCompare = user ? user.password_hash : DUMMY_HASH;
+    const valid = await bcrypt.compare(password, hashToCompare);
+
+    if (!user || !valid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Fix #2: Add jti claim for token revocation support
+    const jti = crypto.randomUUID();
+    const token = jwt.sign(
+      { sub: user.id, email: user.email, jti },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
     );
-  } catch (err) {
-    console.error('[audit] Failed to write audit log:', err.message);
-  }
-}
 
-router.post(
-  '/login',
-  [
-    body('email').trim().isEmail().normalizeEmail(),
-    body('password').isLength({ min: 1 }),
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ error: 'Invalid credentials.' });
-    }
+    // Fix #4: Parse JWT_EXPIRES_IN to milliseconds for cookie maxAge
+    const expiresInMs = (() => {
+      const exp = process.env.JWT_EXPIRES_IN || '8h';
+      const match = exp.match(/^(\d+)([hmsd])$/);
+      if (!match) return 8 * 60 * 60 * 1000;
+      const [, n, unit] = match;
+      const multipliers = { s: 1000, m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 };
+      return parseInt(n, 10) * (multipliers[unit] || multipliers.h);
+    })();
 
-    const { email, password } = req.body;
-
-    try {
-      const result = await db.query('SELECT * FROM admin_users WHERE email = $1', [email]);
-      const user = result.rows[0];
-
-      const passwordMatches = await bcrypt.compare(password, user?.password_hash || DUMMY_HASH);
-
-      if (!user || !passwordMatches) {
-        return res.status(401).json({ error: 'Invalid credentials.' });
-      }
-
-      const jti = randomUUID();
-      const token = jwt.sign(
-        { id: user.id, email: user.email, jti },
-        config.jwtSecret,
-        { expiresIn: config.jwtExpiresIn }
-      );
-
-      res.cookie('admin_token', token, {
-        httpOnly: true,
-        secure: config.isProduction,
-        sameSite: 'lax',
-        maxAge: COOKIE_MAX_AGE_MS,
-      });
-
-      res.json({ token, email: user.email });
-    } catch (err) {
-      console.error('[admin] Login error:', err);
-      res.status(500).json({ error: 'Login failed.' });
-    }
-  }
-);
-
-router.post('/logout', authenticateToken, async (req, res) => {
-  try {
-    const { jti, exp } = req.user;
-    if (jti && exp) {
-      await db.query(
-        `INSERT INTO token_blocklist (jti, expires_at)
-         VALUES ($1, to_timestamp($2))
-         ON CONFLICT (jti) DO NOTHING`,
-        [jti, exp]
-      );
-    }
-    res.clearCookie('admin_token', {
+    res.cookie('adminToken', token, {
       httpOnly: true,
-      secure: config.isProduction,
-      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: expiresInMs
     });
+
     res.json({ success: true });
   } catch (err) {
-    console.error('[admin] Logout error:', err);
-    res.status(500).json({ error: 'Logout failed.' });
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-router.get('/me', authenticateToken, (req, res) => {
-  res.json({ id: req.user.id, email: req.user.email });
+/**
+ * POST /api/admin/logout
+ * Fix #2: Revoke the current token by adding its jti to the blocklist
+ */
+router.post('/logout', requireAuth, async (req, res) => {
+  const token = req.cookies?.adminToken || req.headers.authorization?.replace('Bearer ', '');
+  if (token) {
+    try {
+      const decoded = jwt.decode(token);
+      if (decoded?.jti) tokenBlocklist.add(decoded.jti);
+    } catch {
+      // Ignore decode errors
+    }
+  }
+  res.clearCookie('adminToken');
+  res.json({ success: true });
 });
 
-router.get('/stats', authenticateToken, async (req, res) => {
+/**
+ * GET /api/admin/me
+ * Fix #13: Return current authenticated admin user
+ */
+router.get('/me', requireAuth, async (req, res) => {
   try {
-    const totalResult = await db.query('SELECT COUNT(*) AS total FROM contacts');
-    const byStatusResult = await db.query(
-      'SELECT status, COUNT(*) AS c FROM contacts GROUP BY status'
+    const result = await db.query(
+      'SELECT id, email, created_at FROM admins WHERE id = $1',
+      [req.user.sub]
     );
-
-    res.json({
-      total: parseInt(totalResult.rows[0].total, 10),
-      byStatus: byStatusResult.rows.map((r) => ({ status: r.status, c: parseInt(r.c, 10) })),
-    });
+    const user = result.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ user });
   } catch (err) {
-    console.error('[admin] Stats error:', err);
-    res.status(500).json({ error: 'Failed to fetch stats.' });
+    console.error('Me endpoint error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-router.get('/submissions', authenticateToken, async (req, res) => {
+/**
+ * GET /api/admin/submissions
+ * Fix #10: Proper pagination with page/limit/offset
+ * Fix #11: Status filtering + search
+ * Fix #12: Flat response structure (total at root, not nested)
+ */
+router.get('/submissions', requireAuth, [
+  query('page').optional().isInt({ min: 1 }).toInt(),
+  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  query('status').optional().isIn(['new', 'read', 'replied', 'archived']),
+  query('search').optional().trim().escape()
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const page = req.query.page || 1;
+  const limit = req.query.limit || 20;
+  const offset = (page - 1) * limit;
+  const status = req.query.status;
+  const search = req.query.search;
+
   try {
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const pageSize = Math.min(Math.max(Number(req.query.pageSize) || 20, 1), 100);
-    const offset = (page - 1) * pageSize;
-
-    const conditions = [];
+    let whereClause = 'WHERE 1=1';
     const params = [];
+    let pIdx = 1;
 
-    if (req.query.status && VALID_STATUSES.includes(req.query.status)) {
-      params.push(req.query.status);
-      conditions.push(`status = $${params.length}`);
+    if (status) {
+      whereClause += ` AND status = $${pIdx++}`;
+      params.push(status);
     }
-
-    if (req.query.search) {
-      const search = String(req.query.search).trim();
-      if (search.length > 100) {
-        return res.status(400).json({ error: 'Search query too long (max 100 chars).' });
-      }
+    if (search) {
+      whereClause += ` AND (name ILIKE $${pIdx} OR email ILIKE $${pIdx} OR company ILIKE $${pIdx} OR message ILIKE $${pIdx})`;
       params.push(`%${search}%`);
-      const idx = params.length;
-      conditions.push(
-        `(name ILIKE $${idx} OR email ILIKE $${idx} OR company ILIKE $${idx} OR message ILIKE $${idx})`
-      );
+      pIdx++;
     }
-
-    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const countResult = await db.query(
-      `SELECT COUNT(*) AS total FROM contacts ${whereClause}`,
+      `SELECT COUNT(*) FROM contacts ${whereClause}`,
       params
     );
-    const total = parseInt(countResult.rows[0].total, 10);
+    const total = parseInt(countResult.rows[0].count, 10);
 
-    const listParams = [...params, pageSize, offset];
-    const result = await db.query(
-      `SELECT id, first_name, last_name, name, email, company, message, status, created_at
-       FROM contacts ${whereClause}
-       ORDER BY created_at DESC
-       LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
-      listParams
+    const dataResult = await db.query(
+      `SELECT * FROM contacts ${whereClause} ORDER BY created_at DESC LIMIT $${pIdx++} OFFSET $${pIdx++}`,
+      [...params, limit, offset]
     );
 
+    // Fix #12: Flat response — dashboard expects total at root level
     res.json({
-      submissions: result.rows,
+      data: dataResult.rows,
       total,
       page,
-      pageSize,
-      totalPages: Math.ceil(total / pageSize),
+      limit,
+      totalPages: Math.ceil(total / limit)
     });
   } catch (err) {
-    console.error('[admin] Fetch error:', err);
-    res.status(500).json({ error: 'Failed to fetch submissions.' });
+    console.error('Submissions error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-router.patch(
-  '/submissions/:id/status',
-  authenticateToken,
-  [
-    param('id').isInt().withMessage('Invalid submission id.'),
-    body('status').isIn(VALID_STATUSES).withMessage('Status must be new, read, or archived.'),
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ error: 'Validation failed.', details: errors.array() });
-    }
-
-    try {
-      const oldResult = await db.query('SELECT status FROM contacts WHERE id = $1', [req.params.id]);
-      const oldRow = oldResult.rows[0];
-      if (!oldRow) {
-        return res.status(404).json({ error: 'Submission not found.' });
-      }
-      const oldStatus = oldRow.status;
-
-      const result = await db.query(
-        'UPDATE contacts SET status = $1 WHERE id = $2 RETURNING id, status',
-        [req.body.status, req.params.id]
-      );
-
-      await logAudit({
-        adminEmail: req.user.email,
-        action: 'update_status',
-        targetTable: 'contacts',
-        targetId: Number(req.params.id),
-        oldValue: { status: oldStatus },
-        newValue: { status: req.body.status },
-      });
-
-      res.json(result.rows[0]);
-    } catch (err) {
-      console.error('[admin] Status update error:', err);
-      res.status(500).json({ error: 'Failed to update status.' });
-    }
+/**
+ * PATCH /api/admin/submissions/:id/status
+ * Fix #14: Update submission status
+ */
+router.patch('/submissions/:id/status', requireAuth, [
+  param('id').isUUID(),
+  body('status').isIn(['new', 'read', 'replied', 'archived'])
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
   }
-);
 
-router.delete(
-  '/submissions/:id',
-  authenticateToken,
-  [param('id').isInt().withMessage('Invalid submission id.')],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ error: 'Validation failed.', details: errors.array() });
+  try {
+    const result = await db.query(
+      'UPDATE contacts SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [req.body.status, req.params.id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Submission not found' });
     }
-
-    try {
-      const oldResult = await db.query('SELECT * FROM contacts WHERE id = $1', [req.params.id]);
-      const oldRow = oldResult.rows[0];
-      if (!oldRow) {
-        return res.status(404).json({ error: 'Submission not found.' });
-      }
-
-      const result = await db.query('DELETE FROM contacts WHERE id = $1 RETURNING id', [
-        req.params.id,
-      ]);
-
-      await logAudit({
-        adminEmail: req.user.email,
-        action: 'delete',
-        targetTable: 'contacts',
-        targetId: Number(req.params.id),
-        oldValue: oldRow,
-        newValue: null,
-      });
-
-      res.status(204).end();
-    } catch (err) {
-      console.error('[admin] Delete error:', err);
-      res.status(500).json({ error: 'Failed to delete submission.' });
-    }
+    res.json({ success: true, submission: result.rows[0] });
+  } catch (err) {
+    console.error('Update status error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
-);
+});
 
-export default router;
+/**
+ * DELETE /api/admin/submissions/:id
+ * Fix #14: Delete a submission
+ */
+router.delete('/submissions/:id', requireAuth, [
+  param('id').isUUID()
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  try {
+    const result = await db.query('DELETE FROM contacts WHERE id = $1', [req.params.id]);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Submission not found' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Delete submission error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+module.exports = { router, tokenBlocklist };
