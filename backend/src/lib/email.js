@@ -13,7 +13,7 @@ function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-export async function sendContactNotification({ name = 'Unknown', email = '', message = '', id = '' } = {}) {
+export async function sendContactNotification({ name = 'Unknown', company = '', email = '', message = '', id = '' } = {}) {
   if (!resend) {
     console.log('[email] RESEND_API_KEY not set — skipping notification.');
     return;
@@ -30,6 +30,7 @@ export async function sendContactNotification({ name = 'Unknown', email = '', me
   const safeMessage = typeof message === 'string' ? message : String(message || '');
   const htmlMessage = escapeHtml(safeMessage).replace(/\n/g, '<br/>');
   const safeName = escapeHtml(name);
+  const safeCompany = escapeHtml(company || '');
   const safeEmail = escapeHtml(email);
   const safeId = escapeHtml(String(id));
 
@@ -41,11 +42,12 @@ export async function sendContactNotification({ name = 'Unknown', email = '', me
       html: `
         <h2>New Contact Submission</h2>
         <p><strong>From:</strong> ${safeName} (${safeEmail})</p>
+        ${safeCompany ? `<p><strong>Company:</strong> ${safeCompany}</p>` : ''}
         <p><strong>ID:</strong> ${safeId}</p>
         <hr/>
         <p>${htmlMessage}</p>
       `,
-      text: `From: ${name} (${email})\n\nMessage:\n${safeMessage}`,
+      text: `From: ${name}${company ? ` (${company})` : ''} (${email})\n\nMessage:\n${safeMessage}`,
     });
   } catch (err) {
     console.error('[email] error sending contact notification:', err);
