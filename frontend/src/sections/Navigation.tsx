@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { Menu, X, Shield } from 'lucide-react';
 
 const navLinks = [
-  { href: '#ai-core', label: 'AI Core' },
-  { href: '#ai-defense', label: 'Defense' },
+  { href: '#ai-core', label: 'Approach' },
+  { href: '#ai-defense', label: 'Live Status' },
   { href: '#services', label: 'Services' },
-  { href: '#ai-lab', label: 'AI Lab' },
+  { href: '#ai-lab', label: 'Research' },
 ];
 
 export default function Navigation() {
@@ -72,7 +72,7 @@ export default function Navigation() {
               onClick={() => scrollToSection('#contact')}
               className="px-6 py-2.5 btn-gradient text-white font-semibold rounded-full hover:shadow-lg hover:shadow-alux-cyan/25 transition-all hover:scale-105 text-sm"
             >
-              Activate Neural Shield
+              Book a Consultation
             </button>
           </div>
 
@@ -107,7 +107,7 @@ export default function Navigation() {
             onClick={() => scrollToSection('#contact')}
             className="block w-full text-left px-4 py-3 text-alux-cyan font-semibold"
           >
-            Activate Neural Shield
+            Book a Consultation
           </button>
         </div>
       </div>
