@@ -79,9 +79,9 @@ function NeuralCoreSVG() {
 
   // Cluster positions
   const clusters = [
-    { cx: 200, cy: 250, color: '#00d4ff', label: 'TRANSFORMER SENTINEL' },
-    { cx: 400, cy: 150, color: '#a855f7', label: 'GRAPH NEURAL DEFENDER' },
-    { cx: 600, cy: 250, color: '#00ff88', label: 'REINFORCEMENT AGENT' },
+    { cx: 200, cy: 250, color: '#00d4ff', label: 'STANDARDS ASSESSMENT' },
+    { cx: 400, cy: 150, color: '#a855f7', label: 'ATTACK PATH MAPPING' },
+    { cx: 600, cy: 250, color: '#00ff88', label: 'CONTINUOUS REVIEW' },
   ];
 
   // Satellite orbits for each cluster
@@ -234,38 +234,29 @@ const featureCards = [
   {
     icon: Brain,
     iconGradient: 'from-alux-purple to-purple-700',
-    title: 'Transformer Sentinel',
+    title: 'Standards-Based Assessment',
     description:
-      'Self-attention mechanisms analyze entire network traffic as semantic sequences. Our 50B-parameter transformer understands attack intent, not just signatures.',
-    metricLeft: '50B Parameters',
-    metricRight: 'Active',
-    metricColor: 'text-alux-green',
-    progress: 94,
-    progressGradient: 'from-alux-cyan to-alux-green',
+      'Every engagement is scored against a named standard — NIST SP 800-61, PCI DSS SAQ A, Kenya\'s DPA 2019, or OWASP LLM Top 10 — so findings map directly to something you can hand an auditor.',
+    tagLeft: 'NIST · PCI DSS · OWASP',
+    tagRight: 'Kenya DPA 2019',
   },
   {
     icon: Zap,
     iconGradient: 'from-alux-cyan to-blue-600',
-    title: 'Graph Neural Defender',
+    title: 'Attack Path Mapping',
     description:
-      'GNNs map your entire infrastructure as a dynamic graph, understanding lateral movement paths and privilege escalation chains.',
-    metricLeft: 'Graph Active',
-    metricRight: 'Learning',
-    metricColor: 'text-alux-green',
-    progress: 87,
-    progressGradient: 'from-alux-cyan to-alux-green',
+      'We map how a real attacker would move through your infrastructure — lateral movement routes, privilege escalation chains — using a mix of automated scanning and manual review, not just a scanner report.',
+    tagLeft: 'Manual + automated',
+    tagRight: 'Prioritized findings',
   },
   {
     icon: CheckCircle,
     iconGradient: 'from-alux-green to-emerald-600',
-    title: 'Reinforcement Agent',
+    title: 'Continuous Review',
     description:
-      'Self-improving AI agents run millions of simulated attack-defense scenarios daily. Each encounter makes the system smarter.',
-    metricLeft: 'Training',
-    metricRight: '+12% Daily',
-    metricColor: 'text-alux-green',
-    progress: 91,
-    progressGradient: 'from-alux-green to-alux-cyan',
+      'Methodologies get refined based on what we actually find in engagements — not a marketing claim about self-improving AI, just an honest practice of updating checklists when something new turns up.',
+    tagLeft: 'Living checklists',
+    tagRight: 'Updated per engagement',
   },
 ];
 
@@ -313,14 +304,14 @@ export default function AICore() {
         <div className="text-center mb-16 reveal">
           <div className="inline-flex items-center px-4 py-2 rounded-full bg-alux-purple/10 border border-alux-purple/20 text-alux-purple text-sm font-medium mb-4">
             <Zap className="w-4 h-4 mr-2" />
-            Neural Network Architecture
+            Our Methodology
           </div>
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-serif font-bold text-white mb-6">
-            The <span className="gradient-text-purple">AI Core</span> Engine
+            How We <span className="gradient-text-purple">Actually Work</span>
           </h2>
           <p className="text-[#94a3b8] text-lg max-w-2xl mx-auto">
-            A multi-modal neural architecture combining transformer models, graph neural networks,
-            and reinforcement learning agents into a single autonomous security consciousness.
+            Three pillars, each grounded in a real standard — not a black-box AI claim you have
+            to take on faith.
           </p>
         </div>
 
@@ -347,17 +338,14 @@ export default function AICore() {
               </div>
               <h3 className="text-xl font-serif font-bold text-white mb-3">{card.title}</h3>
               <p className="text-[#94a3b8] text-sm leading-relaxed mb-6">{card.description}</p>
-              <div className="flex items-center justify-between text-sm font-mono mb-3">
-                <span style={{ color: i === 0 ? '#a855f7' : i === 1 ? '#00d4ff' : '#00ff88' }}>
-                  {card.metricLeft}
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span
+                  className="px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/10"
+                  style={{ color: i === 0 ? '#a855f7' : i === 1 ? '#00d4ff' : '#00ff88' }}
+                >
+                  {card.tagLeft}
                 </span>
-                <span className={card.metricColor}>{card.metricRight}</span>
-              </div>
-              <div className="h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
-                <div
-                  className={`h-full bg-gradient-to-r ${card.progressGradient} rounded-full`}
-                  style={{ width: `${card.progress}%` }}
-                />
+                <span className="text-[#94a3b8]">{card.tagRight}</span>
               </div>
             </div>
           ))}
