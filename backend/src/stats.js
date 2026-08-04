@@ -5,11 +5,6 @@ let stats = {
   totalMessages: 0
 };
 
-/**
- * Fix #7: Replace top-level await with explicit async init function.
- * Call this after DB connection is established in index.js.
- * If DB is down, stats default to 0 and can be retried later.
- */
 async function loadPersistedValues() {
   try {
     const contactResult = await db.query('SELECT COUNT(*) FROM contacts');
@@ -21,7 +16,6 @@ async function loadPersistedValues() {
     console.log(`[stats] Loaded: ${stats.totalContacts} contacts, ${stats.totalMessages} messages`);
   } catch (err) {
     console.error('[stats] Failed to load persisted values:', err.message);
-    // Stats remain at 0 — safe fallback. Retry can be triggered manually.
   }
 }
 
@@ -36,6 +30,13 @@ function incrementContacts() {
 function incrementMessages() {
   stats.totalMessages++;
 }
+
+// Background refresh every 5 minutes
+setInterval(() => {
+  loadPersistedValues().catch(err => {
+    console.error('[stats] Background refresh failed:', err.message);
+  });
+}, 5 * 60 * 1000);
 
 module.exports = {
   loadPersistedValues,
