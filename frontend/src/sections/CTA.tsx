@@ -34,6 +34,11 @@ export default function CTA() {
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
+  const scrollToServices = useCallback(() => {
+    const el = document.querySelector('#services');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
   return (
     <section
       ref={sectionRef}
@@ -60,16 +65,16 @@ export default function CTA() {
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
         <div className="cta-animate inline-flex items-center px-4 py-2 rounded-full bg-alux-cyan/10 border border-alux-cyan/20 text-alux-cyan text-sm font-medium mb-6">
           <span className="w-2 h-2 bg-alux-cyan rounded-full mr-2 animate-pulse" />
-          NEURAL DEPLOYMENT READY
+          READY WHEN YOU ARE
         </div>
 
         <h2 className="cta-animate text-3xl md:text-4xl lg:text-5xl font-serif font-bold text-white mb-6">
-          Activate Your <span className="gradient-text-cyan">AI Defense</span>
+          Let's Talk About <span className="gradient-text-cyan">Your Risk</span>
         </h2>
 
         <p className="cta-animate text-lg md:text-xl text-[#94a3b8] mb-10 max-w-2xl mx-auto">
-          Join enterprises protected by autonomous neural defense. Our AI begins learning your
-          environment within seconds of deployment.
+          Tell us what you're trying to protect, and we'll scope the engagement — no automated
+          sales pitch, just a conversation about what you actually need.
         </p>
 
         <div className="cta-animate flex flex-col sm:flex-row gap-4 justify-center">
@@ -78,15 +83,15 @@ export default function CTA() {
             className="px-8 py-4 btn-gradient text-white font-bold rounded-full hover:shadow-xl hover:shadow-alux-cyan/30 transition-all hover:scale-105 text-lg flex items-center justify-center gap-2"
           >
             <Zap className="w-5 h-5" />
-            Initialize Neural Shield
+            Book a Consultation
           </button>
-          <a
-            href="tel:+18002589241"
+          <button
+            onClick={scrollToServices}
             className="px-8 py-4 border border-alux-cyan/50 text-alux-cyan font-semibold rounded-full hover:bg-alux-cyan/10 transition-all text-lg flex items-center justify-center gap-2"
           >
             <Phone className="w-5 h-5" />
-            1-800-ALUX-AI
-          </a>
+            See What We Offer
+          </button>
         </div>
       </div>
     </section>
