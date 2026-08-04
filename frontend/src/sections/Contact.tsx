@@ -106,7 +106,9 @@ export default function Contact() {
 
       try {
         const payload = {
-          name: `${formData.firstName} ${formData.lastName}`.trim(),
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          company: formData.company,
           email: formData.email,
           message: formData.message,
           honeypot: formData.website,
