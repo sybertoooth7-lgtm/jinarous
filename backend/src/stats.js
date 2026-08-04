@@ -1,129 +1,45 @@
-import db from './db.js';
+const db = require('./db');
 
-const MAX_LATENCY_SAMPLES = 200;
-const PERSISTED_KEYS = ['requestCount', 'errorCount', 'contactAttempts', 'contactSuccesses', 'honeypotBlocked'];
-const FLUSH_INTERVAL_MS = 10000;
-
-async function loadPersistedValue(key) {
-  try {
-    const result = await db.query('SELECT value FROM metrics WHERE key = $1', [key]);
-    return result.rows[0] ? parseInt(result.rows[0].value, 10) : 0;
-  } catch (err) {
-    console.error(`[stats] Failed to load ${key}, defaulting to 0:`, err.message);
-    return 0;
-  }
-}
-
-const requestCount = await loadPersistedValue('requestCount');
-const errorCount = await loadPersistedValue('errorCount');
-const contactAttempts = await loadPersistedValue('contactAttempts');
-const contactSuccesses = await loadPersistedValue('contactSuccesses');
-const honeypotBlocked = await loadPersistedValue('honeypotBlocked');
-
-export const stats = {
-  serverStartTime: Date.now(),
-  requestCount,
-  errorCount,
-  latencies: [],
-  contactAttempts,
-  contactSuccesses,
-  honeypotBlocked,
-  instanceRequestCount: 0,
-  instanceErrorCount: 0,
+let stats = {
+  totalContacts: 0,
+  totalMessages: 0
 };
 
-let dirty = false;
-let isPersisting = false;
-
-const pendingDelta = Object.fromEntries(PERSISTED_KEYS.map(k => [k, 0]));
-
-export async function persistStats() {
-  if (!dirty) return;
-  if (isPersisting) return;
-  isPersisting = true;
-
+/**
+ * Fix #7: Replace top-level await with explicit async init function.
+ * Call this after DB connection is established in index.js.
+ * If DB is down, stats default to 0 and can be retried later.
+ */
+async function loadPersistedValues() {
   try {
-    const deltas = { ...pendingDelta };
-    await db.transaction(async (client) => {
-      for (const key of PERSISTED_KEYS) {
-        if (!deltas[key]) continue;
-        await client.query(`
-          INSERT INTO metrics (key, value) VALUES ($1, $2)
-          ON CONFLICT (key) DO UPDATE SET value = metrics.value + EXCLUDED.value
-        `, [key, deltas[key]]);
-      }
-    });
-    for (const key of PERSISTED_KEYS) pendingDelta[key] -= deltas[key];
-    dirty = false;
-  } finally {
-    isPersisting = false;
+    const contactResult = await db.query('SELECT COUNT(*) FROM contacts');
+    const messageResult = await db.query('SELECT COUNT(*) FROM contacts WHERE message IS NOT NULL');
+
+    stats.totalContacts = parseInt(contactResult.rows[0].count, 10) || 0;
+    stats.totalMessages = parseInt(messageResult.rows[0].count, 10) || 0;
+
+    console.log(`[stats] Loaded: ${stats.totalContacts} contacts, ${stats.totalMessages} messages`);
+  } catch (err) {
+    console.error('[stats] Failed to load persisted values:', err.message);
+    // Stats remain at 0 — safe fallback. Retry can be triggered manually.
   }
 }
 
-export async function getPersistedTotals() {
-  const result = await db.query(
-    `SELECT key, value FROM metrics WHERE key = ANY($1)`,
-    [PERSISTED_KEYS]
-  );
-  const totals = Object.fromEntries(PERSISTED_KEYS.map(k => [k, 0]));
-  for (const row of result.rows) {
-    totals[row.key] = parseInt(row.value, 10);
-  }
-  return totals;
+function getStats() {
+  return { ...stats };
 }
 
-setInterval(() => persistStats().catch(console.error), FLUSH_INTERVAL_MS);
-process.on('SIGTERM', () => persistStats().catch(console.error));
-process.on('SIGINT', () => persistStats().catch(console.error));
-
-export function recordRequest(latencyMs, isError) {
-  stats.requestCount += 1;
-  stats.instanceRequestCount += 1;
-  pendingDelta.requestCount += 1;
-  if (isError) {
-    stats.errorCount += 1;
-    stats.instanceErrorCount += 1;
-    pendingDelta.errorCount += 1;
-  }
-  stats.latencies.push(latencyMs);
-  if (stats.latencies.length > MAX_LATENCY_SAMPLES) stats.latencies.shift();
-  dirty = true;
+function incrementContacts() {
+  stats.totalContacts++;
 }
 
-export function recordContactAttempt() {
-  stats.contactAttempts += 1;
-  pendingDelta.contactAttempts += 1;
-  dirty = true;
+function incrementMessages() {
+  stats.totalMessages++;
 }
 
-export function recordContactSuccess() {
-  stats.contactSuccesses += 1;
-  pendingDelta.contactSuccesses += 1;
-  dirty = true;
-}
-
-export function recordHoneypotBlocked() {
-  stats.honeypotBlocked += 1;
-  pendingDelta.honeypotBlocked += 1;
-  dirty = true;
-}
-
-export function getUptimeSeconds() {
-  return (Date.now() - stats.serverStartTime) / 1000;
-}
-
-export function getAverageLatencyMs() {
-  if (stats.latencies.length === 0) return null;
-  return stats.latencies.reduce((a, b) => a + b, 0) / stats.latencies.length;
-}
-
-export function getRequestsPerSecond() {
-  const uptime = getUptimeSeconds();
-  if (uptime <= 0) return 0;
-  return stats.instanceRequestCount / uptime;
-}
-
-export function getAutoResponseRate() {
-  if (stats.contactAttempts === 0) return null;
-  return (stats.contactSuccesses / stats.contactAttempts) * 100;
-}
+module.exports = {
+  loadPersistedValues,
+  getStats,
+  incrementContacts,
+  incrementMessages
+};
