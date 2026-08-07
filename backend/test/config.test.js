@@ -77,7 +77,7 @@ describe('config.js fail-fast validation', () => {
       CORS_ORIGIN: 'aluxplaza.com', // missing scheme - would never match a real Origin header
     });
     expect(code).not.toBe(0);
-    expect(output).toMatch(/missing the scheme/);
+    expect(output).toMatch(/missing scheme/);
   });
 
   it('strips a trailing slash from CORS_ORIGIN rather than leaving a value that can never match', () => {
