@@ -8,13 +8,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-appuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-appdb}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appuser} -d ${POSTGRES_DB:-appdb}"]
       interval: 5s
@@ -23,23 +22,12 @@ services:
     networks:
       - app-network
 
-  # Redis (for cluster-safe rate limiting)
-  redis:
-    image: redis:7-alpine
-    container_name: app-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - app-network
+  # NOTE: a Redis service used to be here for rate limiting. It's removed —
+  # the rate limiter now uses a Postgres-backed store (rate_limits table,
+  # migration 005) instead, since REDIS_URL was never actually set anywhere
+  # in practice and the rate limiter was silently falling back to a
+  # non-cluster-safe in-memory store the whole time. One less service to
+  # run, patch, and pay for.
 
   # Backend API
   backend:
@@ -51,13 +39,19 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3001
-      DATABASE_URL: postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-appdb}
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      DATABASE_URL: postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env — no default, so a real deployment can't accidentally run with a known password}@postgres:5432/${POSTGRES_DB:-appdb}
+      # No fallback default — config.js already refuses to boot in
+      # production without a real JWT_SECRET, but the old default here
+      # ("dev-secret-change-in-production") meant anyone who forgot to
+      # override it in .env got a publicly-known secret instead of a
+      # clear failure. Failing loud here is safer than failing loud only
+      # sometimes, deep inside the app.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env — generate one with: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      # CORS_ORIGIN, not FRONTEND_URL — matches what config.js/index.js
+      # actually read. The old FRONTEND_URL var here was silently ignored.
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       CLUSTER_MODE: ${CLUSTER_MODE:-false}
-      WORKERS: ${WORKERS:-2}
     ports:
       - "3001:3001"
     volumes:
@@ -66,12 +60,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
     networks:
       - app-network
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      # /health, not /api/health — the old path here 404'd against every
+      # real deployment of this backend, so Docker would eventually mark a
+      # perfectly healthy container as unhealthy and restart it.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/api/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -92,7 +87,6 @@ services:
 
 volumes:
   postgres_data:
-  redis_data:
 
 networks:
   app-network:
