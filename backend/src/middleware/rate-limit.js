@@ -1,71 +1,49 @@
-const rateLimit = require('express-rate-limit');
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { PostgresRateLimitStore } from '../lib/rate-limit-store.js';
 
-/**
- * Fix #5: Cluster-aware rate limiting using Redis store.
- * Install dependencies: npm install rate-limit-redis ioredis
- * 
- * Falls back to memory store if Redis is unavailable (logs warning).
- */
+// General API rate limiter — generous, just a backstop against abuse.
+export const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new PostgresRateLimitStore(),
+  handler: (req, res) => {
+    res.status(429).json({
+      error: 'Too many requests, please try again later.',
+      retryAfter: 15 * 60,
+    });
+  },
+});
 
-let RedisStore;
-try {
-  RedisStore = require('rate-limit-redis');
-} catch {
-  console.warn('[rate-limit] rate-limit-redis not installed. Using memory store (not cluster-safe).');
-}
+// Stricter limiter specifically for admin login — separate key prefix so it
+// doesn't share a budget with general API traffic, and a stricter cap since
+// brute-forcing a login endpoint is the actual threat this defends against.
+export const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new PostgresRateLimitStore(),
+  keyGenerator: (req) => `auth:${ipKeyGenerator(req.ip)}`,
+  handler: (req, res) => {
+    res.status(429).json({
+      error: 'Too many login attempts, please try again later.',
+      retryAfter: 15 * 60,
+    });
+  },
+});
 
-let Redis;
-try {
-  Redis = require('ioredis');
-} catch {
-  console.warn('[rate-limit] ioredis not installed. Using memory store (not cluster-safe).');
-}
-
-function createLimiter() {
-  const windowMs = 15 * 60 * 1000; // 15 minutes
-  const max = 100; // requests per window per IP
-
-  const baseConfig = {
-    windowMs,
-    max,
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator: (req) => req.ip,
-    handler: (req, res) => {
-      res.status(429).json({ 
-        error: 'Too many requests, please try again later.',
-        retryAfter: Math.ceil(windowMs / 1000)
-      });
-    }
-  };
-
-  // Use Redis store if available and REDIS_URL is set
-  if (RedisStore && Redis && process.env.REDIS_URL) {
-    try {
-      const redisClient = new Redis(process.env.REDIS_URL, {
-        retryStrategy: (times) => Math.min(times * 50, 2000),
-        maxRetriesPerRequest: 3
-      });
-
-      redisClient.on('error', (err) => {
-        console.error('[rate-limit] Redis error:', err.message);
-      });
-
-      return rateLimit({
-        ...baseConfig,
-        store: new RedisStore({
-          sendCommand: (...args) => redisClient.call(...args),
-        })
-      });
-    } catch (err) {
-      console.warn('[rate-limit] Failed to create Redis store, falling back to memory:', err.message);
-    }
-  }
-
-  // Fallback: memory store (works for single-instance, not cluster-safe)
-  return rateLimit(baseConfig);
-}
-
-const limiter = createLimiter();
-
-module.exports = { limiter, createLimiter };
+// Contact form gets its own budget, matching CONTACT_RATE_LIMIT_* env vars
+// documented in the README.
+export const contactLimiter = rateLimit({
+  windowMs: (Number(process.env.CONTACT_RATE_LIMIT_WINDOW_MINUTES) || 15) * 60 * 1000,
+  max: Number(process.env.CONTACT_RATE_LIMIT_MAX) || 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new PostgresRateLimitStore(),
+  keyGenerator: (req) => `contact:${ipKeyGenerator(req.ip)}`,
+  handler: (req, res) => {
+    res.status(429).json({ error: 'Too many submissions, please try again later.' });
+  },
+});
