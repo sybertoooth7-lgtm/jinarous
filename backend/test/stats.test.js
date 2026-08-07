@@ -14,9 +14,10 @@ import db from '../src/db.js';
 
 describe('stats.js', () => {
   it('starts with zeroed counters on a fresh database', () => {
-    // Note: this only holds true because tests/setup.js points DB_PATH at a
-    // brand-new temp file per test run - a real deployment persists these
-    // across restarts, which is the entire point of this module.
+    // Note: this only holds true because test/setup.js points DATABASE_URL
+    // at a brand-new, freshly-migrated database per test run - a real
+    // deployment persists these across restarts, which is the entire
+    // point of this module.
     expect(stats.requestCount).toBe(0);
     expect(stats.contactAttempts).toBe(0);
   });
@@ -41,7 +42,6 @@ describe('stats.js', () => {
   });
 
   it('getAutoResponseRate returns null when there have been no contact attempts yet', () => {
-    // Fresh module state per file thanks to the temp DB, but guard anyway:
     if (stats.contactAttempts === 0) {
       expect(getAutoResponseRate()).toBeNull();
     }
@@ -72,14 +72,14 @@ describe('stats.js', () => {
     expect(getRequestsPerSecond()).toBeGreaterThanOrEqual(0);
   });
 
-  it('persistStats writes current counters to the metrics table (the actual fix for issue #2)', () => {
+  it('persistStats writes current counters to the metrics table', async () => {
     recordRequest(15, false);
     const expectedCount = stats.requestCount;
 
-    persistStats();
+    await persistStats();
 
-    const row = db.prepare('SELECT value FROM metrics WHERE key = ?').get('requestCount');
-    expect(row).toBeTruthy();
-    expect(row.value).toBe(expectedCount);
+    const { rows } = await db.query('SELECT value FROM metrics WHERE key = $1', ['requestCount']);
+    expect(rows[0]).toBeTruthy();
+    expect(parseInt(rows[0].value, 10)).toBe(expectedCount);
   });
 });
