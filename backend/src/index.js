@@ -115,7 +115,10 @@ async function startServer() {
     logger.info(`${signal} received, shutting down gracefully`);
     clearInterval(statsInterval);
     await persistStats();
-    server.close(() => process.exit(0));
+    server.close(async () => {
+      await db.end().catch(() => {});
+      process.exit(0);
+    });
     setTimeout(() => process.exit(1), 10_000).unref();
   }
 
@@ -130,6 +133,16 @@ async function main() {
   await initDb();
   initErrorTracking();
   await loadPersistedValues();
+
+  try {
+    const { rows } = await db.query('SELECT COUNT(*) AS count FROM admin_users');
+    if (parseInt(rows[0].count, 10) === 0) {
+      logger.warn('No admin users exist yet. Run `npm run create-admin` once.');
+    }
+  } catch (err) {
+    logger.error(`Failed to check for admin users: ${err.message}`);
+  }
+
   await startServer();
 }
 
