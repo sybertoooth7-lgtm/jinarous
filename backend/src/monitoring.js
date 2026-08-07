@@ -26,6 +26,25 @@ export function captureError(err, context = {}) {
 
 const alertThrottle = new Map(); // key -> last-sent timestamp (ms)
 const ALERT_THROTTLE_MS = 5 * 60 * 1000; // don't re-send the same alert key more than once per 5 min
+const ALERT_THROTTLE_MAX_ENTRIES = 500; // hard cap so this can't grow unbounded
+
+function pruneAlertThrottle() {
+  const cutoff = Date.now() - ALERT_THROTTLE_MS;
+  for (const [key, ts] of alertThrottle) {
+    if (ts < cutoff) alertThrottle.delete(key);
+  }
+  // Belt-and-suspenders: if pruning stale entries still leaves too many
+  // (e.g. a flood of genuinely distinct, recent error messages), drop the
+  // oldest ones rather than let this grow without bound.
+  if (alertThrottle.size > ALERT_THROTTLE_MAX_ENTRIES) {
+    const excess = alertThrottle.size - ALERT_THROTTLE_MAX_ENTRIES;
+    const oldestKeys = [...alertThrottle.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, excess)
+      .map(([key]) => key);
+    for (const key of oldestKeys) alertThrottle.delete(key);
+  }
+}
 
 /**
  * Sends a one-line alert to a Slack or Discord incoming webhook, if configured.
@@ -39,6 +58,8 @@ const ALERT_THROTTLE_MS = 5 * 60 * 1000; // don't re-send the same alert key mor
 export async function sendAlert(message, throttleKey = message) {
   const url = process.env.ALERT_WEBHOOK_URL;
   if (!url) return;
+
+  pruneAlertThrottle();
 
   const lastSent = alertThrottle.get(throttleKey) || 0;
   if (Date.now() - lastSent < ALERT_THROTTLE_MS) return;
