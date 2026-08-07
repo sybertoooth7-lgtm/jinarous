@@ -17,8 +17,7 @@ describe('POST /api/contact', () => {
     const res = await request(app)
       .post('/api/contact')
       .send({
-        firstName: 'Jane',
-        lastName: 'Doe',
+        name: 'Jane Doe',
         email: 'jane@example.com',
         company: 'Acme Ltd',
         message: 'Interested in an access control audit.',
@@ -28,54 +27,78 @@ describe('POST /api/contact', () => {
     expect(res.body.success).toBe(true);
     expect(typeof res.body.id).toBe('number');
 
-    const row = db.prepare('SELECT * FROM submissions WHERE id = ?').get(res.body.id);
-    expect(row).toBeTruthy();
-    expect(row.email).toBe('jane@example.com');
+    const { rows } = await db.query('SELECT * FROM contacts WHERE id = $1', [res.body.id]);
+    expect(rows[0]).toBeTruthy();
+    expect(rows[0].email).toBe('jane@example.com');
+    expect(rows[0].status).toBe('new');
+  });
+
+  it('stores special characters exactly as submitted, not double-escaped', async () => {
+    // Regression test for the double-escaping bug: contact.js used to call
+    // .escape() before storing, on top of dashboard.js already escaping at
+    // render time - "AT&T" would end up permanently stored as "AT&amp;T".
+    const app = buildTestApp();
+    const res = await request(app).post('/api/contact').send({
+      name: "O'Brien & Sons",
+      email: 'obrien@example.com',
+      company: 'AT&T "Ventures"',
+      message: 'Quotes " and apostrophes \' and ampersands & should survive intact.',
+    });
+
+    expect(res.status).toBe(201);
+    const { rows } = await db.query('SELECT * FROM contacts WHERE id = $1', [res.body.id]);
+    expect(rows[0].name).toBe("O'Brien & Sons");
+    expect(rows[0].company).toBe('AT&T "Ventures"');
   });
 
   it('rejects a submission missing required fields with 400', async () => {
     const app = buildTestApp();
-    const res = await request(app).post('/api/contact').send({ firstName: 'OnlyFirstName' });
+    const res = await request(app).post('/api/contact').send({ name: 'OnlyName' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Validation failed.');
+    expect(Array.isArray(res.body.errors)).toBe(true);
   });
 
   it('rejects a submission with an invalid email with 400', async () => {
     const app = buildTestApp();
     const res = await request(app).post('/api/contact').send({
-      firstName: 'Jane',
-      lastName: 'Doe',
+      name: 'Jane Doe',
       email: 'not-an-email',
+      message: 'hello',
     });
 
     expect(res.status).toBe(400);
   });
 
-  it('rejects a bot-shaped submission that fills in the honeypot field', async () => {
+  it('silently accepts (200, not stored) a bot-shaped submission that fills in the honeypot field', async () => {
+    // Deliberately does NOT return 400 for a honeypot trip - telling the
+    // bot "you got caught" via a distinct status code just teaches it to
+    // avoid the honeypot field next time. A quiet 200 that looks identical
+    // to a real success response is the correct behavior here.
     const app = buildTestApp();
     const res = await request(app).post('/api/contact').send({
-      firstName: 'Bot',
-      lastName: 'Spam',
+      name: 'Bot Spam',
       email: 'bot@spam.com',
-      website: 'http://spam.example.com', // honeypot field - real users never fill this in
+      message: 'buy now',
+      honeypot: 'http://spam.example.com', // real users never fill this in
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
   });
 
   it('does not store a rejected/honeypot submission in the database', async () => {
     const app = buildTestApp();
-    const countBefore = db.prepare('SELECT COUNT(*) AS c FROM submissions').get().c;
+    const countBefore = (await db.query('SELECT COUNT(*) AS c FROM contacts')).rows[0].c;
 
     await request(app).post('/api/contact').send({
-      firstName: 'Bot',
-      lastName: 'Spam',
+      name: 'Bot Spam',
       email: 'bot2@spam.com',
-      website: 'http://spam.example.com',
+      message: 'buy now',
+      honeypot: 'http://spam.example.com',
     });
 
-    const countAfter = db.prepare('SELECT COUNT(*) AS c FROM submissions').get().c;
+    const countAfter = (await db.query('SELECT COUNT(*) AS c FROM contacts')).rows[0].c;
     expect(countAfter).toBe(countBefore);
   });
 });
