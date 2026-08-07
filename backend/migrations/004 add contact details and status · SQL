@@ -1,20 +1,16 @@
--- The admin dashboard (public/admin/admin.js) has always expected first_name,
--- last_name, company, and status on each contact submission, but the original
--- schema only had `name`, `email`, `message`. This migration adds the missing
--- columns and backfills first_name/last_name from the existing `name` column
--- so old submissions still display sensibly in the dashboard.
-
-ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_name TEXT;
-ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_name TEXT;
+-- The admin dashboard (public/admin/dashboard.js) renders company, status,
+-- and expects an updated_at timestamp on each contact submission, but the
+-- original schema (001_init.sql) only had name, email, message, created_at.
+--
+-- NOTE: an earlier version of this migration was accidentally committed
+-- with a broken filename ("004 add contact details and status · SQL" - no
+-- .sql extension), so it silently never ran. This is the corrected version.
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS company TEXT;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'new';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
--- Backfill: split the existing combined `name` on the first space.
--- Rows with no space in `name` get the whole thing as first_name.
-UPDATE contacts
-SET
-  first_name = COALESCE(first_name, split_part(name, ' ', 1)),
-  last_name = COALESCE(last_name, NULLIF(substring(name FROM position(' ' IN name) + 1), ''))
-WHERE first_name IS NULL;
-
-CREATE INDEX IF NOT EXISTS idx_contacts_status ON contacts (status);
+-- Matches the status values dashboard.js actually offers in its dropdown:
+-- new, read, replied, archived.
+ALTER TABLE contacts DROP CONSTRAINT IF EXISTS contacts_status_check;
+ALTER TABLE contacts ADD CONSTRAINT contacts_status_check
+  CHECK (status IN ('new', 'read', 'replied', 'archived'));
