@@ -69,4 +69,35 @@ router.post(
   }
 );
 
+router.get('/runs', requireAuth, async (req, res) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+  try {
+    const { rows } = await db.query(
+      `SELECT id, tool, target, status, summary_json, run_by, created_at
+       FROM tool_runs ORDER BY created_at DESC LIMIT $1`,
+      [limit]
+    );
+    res.json({ runs: rows });
+  } catch (err) {
+    console.error('[tools] Failed to list runs:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/runs/:id', requireAuth, async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'Invalid run id.' });
+  }
+  try {
+    const { rows } = await db.query('SELECT * FROM tool_runs WHERE id = $1', [req.params.id]);
+    if (!rows[0]) {
+      return res.status(404).json({ error: 'Run not found.' });
+    }
+    res.json({ run: rows[0] });
+  } catch (err) {
+    console.error('[tools] Failed to fetch run:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
