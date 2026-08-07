@@ -121,3 +121,8 @@ export function getRequestsPerSecond() {
   const uptime = getUptimeSeconds();
   return uptime > 0 ? stats.requestCount / uptime : 0;
 }
+
+export function getAutoResponseRate() {
+  if (stats.contactAttempts === 0) return null;
+  return (stats.contactSuccesses / stats.contactAttempts) * 100;
+}
