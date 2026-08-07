@@ -51,6 +51,9 @@ export const db = {
       client.release();
     }
   },
+  end() {
+    return pool.end();
+  },
 };
 
 export default db;
