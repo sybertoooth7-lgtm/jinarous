@@ -1,92 +1,85 @@
-const express = require('express');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
-const { body, param, query, validationResult } = require('express-validator');
-const db = require('../db');
-const { requireAuth } = require('../middleware/auth');
+import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import { body, param, query, validationResult } from 'express-validator';
+import db from '../db.js';
+import { config } from '../config.js';
+import { requireAuth, blocklistToken } from '../middleware/auth.js';
 
-const router = express.Router();
+const router = Router();
 
-// In-memory token blocklist (use Redis in production for multi-instance deployments)
-const tokenBlocklist = new Set();
+// A precomputed bcrypt hash of a random value, compared against on every
+// login attempt regardless of whether the email exists — otherwise a
+// nonexistent email skips bcrypt.compare entirely and responds noticeably
+// faster than a wrong password, leaking which emails are registered.
+const DUMMY_HASH = '$2b$12$c.ByGOhklqTXtY6UiWrCieVW3v1ZsI5tlBj/MfE9V92LjUYa9iuHu';
 
-// Helper: constant-time comparison dummy hash (60 chars, bcrypt format)
-const DUMMY_HASH = '$2b$10$abcdefghijklmnopqrstuvwxycdefghijklmnopqrstu';
+const VALID_STATUSES = ['new', 'read', 'replied', 'archived'];
+
+function parseExpiryToMs(value, fallbackMs) {
+  if (!value) return fallbackMs;
+  const match = String(value).trim().match(/^(\d+)\s*(ms|s|m|h|d)?$/i);
+  if (!match) return fallbackMs;
+  const amount = Number(match[1]);
+  const unit = (match[2] || 's').toLowerCase();
+  const multipliers = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+  return amount * (multipliers[unit] || 1000);
+}
+
+const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 8 * 60 * 60 * 1000);
 
 /**
  * POST /api/admin/login
- * Fix #3: Timing attack — always run bcrypt.compare regardless of user existence
- * Fix #4: Cookie maxAge tracks JWT_EXPIRES_IN dynamically
  */
 router.post('/login', [
   body('email').isEmail().normalizeEmail(),
-  body('password').isString().trim().notEmpty()
+  body('password').isString().trim().notEmpty(),
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
+    return res.status(400).json({ error: 'Invalid credentials' });
   }
 
   const { email, password } = req.body;
 
   try {
-    const result = await db.query('SELECT * FROM admins WHERE email = $1', [email]);
+    const result = await db.query('SELECT * FROM admin_users WHERE email = $1', [email]);
     const user = result.rows[0];
 
-    // Fix #3: Always compare to prevent timing attacks
-    const hashToCompare = user ? user.password_hash : DUMMY_HASH;
-    const valid = await bcrypt.compare(password, hashToCompare);
-
-    if (!user || !valid) {
+    const passwordMatches = await bcrypt.compare(password, user?.password_hash || DUMMY_HASH);
+    if (!user || !passwordMatches) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Fix #2: Add jti claim for token revocation support
     const jti = crypto.randomUUID();
     const token = jwt.sign(
       { sub: user.id, email: user.email, jti },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }
+      config.jwtSecret,
+      { expiresIn: config.jwtExpiresIn }
     );
-
-    // Fix #4: Parse JWT_EXPIRES_IN to milliseconds for cookie maxAge
-    const expiresInMs = (() => {
-      const exp = process.env.JWT_EXPIRES_IN || '8h';
-      const match = exp.match(/^(\d+)([hmsd])$/);
-      if (!match) return 8 * 60 * 60 * 1000;
-      const [, n, unit] = match;
-      const multipliers = { s: 1000, m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 };
-      return parseInt(n, 10) * (multipliers[unit] || multipliers.h);
-    })();
 
     res.cookie('adminToken', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: config.isProduction,
       sameSite: 'strict',
-      maxAge: expiresInMs
+      maxAge: COOKIE_MAX_AGE_MS,
     });
 
-    res.json({ success: true });
+    res.json({ success: true, email: user.email });
   } catch (err) {
-    console.error('Login error:', err);
+    console.error('[admin] Login error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 /**
  * POST /api/admin/logout
- * Fix #2: Revoke the current token by adding its jti to the blocklist
  */
 router.post('/logout', requireAuth, async (req, res) => {
-  const token = req.cookies?.adminToken || req.headers.authorization?.replace('Bearer ', '');
-  if (token) {
-    try {
-      const decoded = jwt.decode(token);
-      if (decoded?.jti) tokenBlocklist.add(decoded.jti);
-    } catch {
-      // Ignore decode errors
-    }
+  if (req.user?.jti) {
+    const expiresAt = req.user.exp ? new Date(req.user.exp * 1000) : new Date(Date.now() + COOKIE_MAX_AGE_MS);
+    await blocklistToken(req.user.jti, expiresAt);
   }
   res.clearCookie('adminToken');
   res.json({ success: true });
@@ -94,12 +87,11 @@ router.post('/logout', requireAuth, async (req, res) => {
 
 /**
  * GET /api/admin/me
- * Fix #13: Return current authenticated admin user
  */
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT id, email, created_at FROM admins WHERE id = $1',
+      'SELECT id, email, created_at FROM admin_users WHERE id = $1',
       [req.user.sub]
     );
     const user = result.rows[0];
@@ -108,22 +100,19 @@ router.get('/me', requireAuth, async (req, res) => {
     }
     res.json({ user });
   } catch (err) {
-    console.error('Me endpoint error:', err);
+    console.error('[admin] /me error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 /**
  * GET /api/admin/submissions
- * Fix #10: Proper pagination with page/limit/offset
- * Fix #11: Status filtering + search
- * Fix #12: Flat response structure (total at root, not nested)
  */
 router.get('/submissions', requireAuth, [
   query('page').optional().isInt({ min: 1 }).toInt(),
   query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
-  query('status').optional().isIn(['new', 'read', 'replied', 'archived']),
-  query('search').optional().trim().escape()
+  query('status').optional().isIn(VALID_STATUSES),
+  query('search').optional().trim(),
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -133,8 +122,7 @@ router.get('/submissions', requireAuth, [
   const page = req.query.page || 1;
   const limit = req.query.limit || 20;
   const offset = (page - 1) * limit;
-  const status = req.query.status;
-  const search = req.query.search;
+  const { status, search } = req.query;
 
   try {
     let whereClause = 'WHERE 1=1';
@@ -151,10 +139,7 @@ router.get('/submissions', requireAuth, [
       pIdx++;
     }
 
-    const countResult = await db.query(
-      `SELECT COUNT(*) FROM contacts ${whereClause}`,
-      params
-    );
+    const countResult = await db.query(`SELECT COUNT(*) FROM contacts ${whereClause}`, params);
     const total = parseInt(countResult.rows[0].count, 10);
 
     const dataResult = await db.query(
@@ -162,27 +147,25 @@ router.get('/submissions', requireAuth, [
       [...params, limit, offset]
     );
 
-    // Fix #12: Flat response — dashboard expects total at root level
     res.json({
       data: dataResult.rows,
       total,
       page,
       limit,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
     });
   } catch (err) {
-    console.error('Submissions error:', err);
+    console.error('[admin] Submissions error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 /**
  * PATCH /api/admin/submissions/:id/status
- * Fix #14: Update submission status
  */
 router.patch('/submissions/:id/status', requireAuth, [
-  param('id').isUUID(),
-  body('status').isIn(['new', 'read', 'replied', 'archived'])
+  param('id').isInt().withMessage('Invalid submission id.'),
+  body('status').isIn(VALID_STATUSES),
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -199,17 +182,16 @@ router.patch('/submissions/:id/status', requireAuth, [
     }
     res.json({ success: true, submission: result.rows[0] });
   } catch (err) {
-    console.error('Update status error:', err);
+    console.error('[admin] Update status error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 /**
  * DELETE /api/admin/submissions/:id
- * Fix #14: Delete a submission
  */
 router.delete('/submissions/:id', requireAuth, [
-  param('id').isUUID()
+  param('id').isInt().withMessage('Invalid submission id.'),
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -223,9 +205,9 @@ router.delete('/submissions/:id', requireAuth, [
     }
     res.json({ success: true });
   } catch (err) {
-    console.error('Delete submission error:', err);
+    console.error('[admin] Delete submission error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-module.exports = { router, tokenBlocklist };
+export default router;
