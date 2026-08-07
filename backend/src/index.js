@@ -97,7 +97,10 @@ async function startServer() {
       return res.status(400).json({ error: 'Malformed request body' });
     }
     captureError(err, { path: req.path, method: req.method });
-    sendAlert(`Unhandled error on ${req.method} ${req.path}: ${err.message}`).catch(() => {});
+    sendAlert(
+      `Unhandled error on ${req.method} ${req.path}: ${err.message}`,
+      `${req.method} ${req.path}` // throttle key: bounded by route count, not by err.message
+    ).catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
   });
