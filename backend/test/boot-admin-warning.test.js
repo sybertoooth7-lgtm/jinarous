@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import fs from 'node:fs';
-import os from 'node:os';
+import pg from 'pg';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -10,31 +9,44 @@ const backendRoot = path.join(__dirname, '..');
 
 // index.js starts a real HTTP server (it never exits on its own), so we
 // spawn it as a real child process, capture its stdout for a short window
-// while it boots, then kill it - the same approach used successfully for
-// the manual restart-persistence verification during development.
-function bootServerAndCaptureLogs(env, port) {
+// while it boots, then kill it.
+async function bootServerAndCaptureLogs(env, port) {
+  // A fresh, migrated Postgres database, same approach as test/setup.js -
+  // this needs to boot the real app against a database with no admin
+  // users yet, which the shared suite-wide test DB won't have by the time
+  // this file runs (other test files may have inserted one).
+  const baseUrl = process.env.DATABASE_URL.replace(/\/[^/]+$/, '');
+  const dbName = `alux_boottest_${Date.now()}`;
+  const adminPool = new pg.Pool({ connectionString: `${baseUrl}/postgres` });
+  await adminPool.query(`CREATE DATABASE ${dbName}`);
+  await adminPool.end();
+
   return new Promise((resolve) => {
-    const tmpDb = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'alux-boot-test-')), 'test.db');
     const proc = spawn('node', ['src/index.js'], {
       cwd: backendRoot,
-      env: { ...process.env, ...env, DB_PATH: tmpDb, PORT: String(port) },
+      env: {
+        ...process.env,
+        ...env,
+        DATABASE_URL: `${baseUrl}/${dbName}`,
+        PORT: String(port),
+      },
     });
 
     let output = '';
     let resolved = false;
-    const finish = () => {
+    const finish = async () => {
       if (resolved) return;
       resolved = true;
       proc.kill('SIGTERM');
+      const cleanupPool = new pg.Pool({ connectionString: `${baseUrl}/postgres` });
+      await cleanupPool.query(`DROP DATABASE IF EXISTS ${dbName}`).catch(() => {});
+      await cleanupPool.end();
       resolve(output);
     };
 
     proc.stdout.on('data', (chunk) => {
       output += chunk.toString();
-      if (output.includes('backend listening')) {
-        // Give the boot-time log lines a brief moment to fully flush,
-        // then stop - more robust than a fixed timer that can be too
-        // short under machine load.
+      if (output.includes('No admin users exist yet')) {
         setTimeout(finish, 200);
       }
     });
@@ -42,7 +54,7 @@ function bootServerAndCaptureLogs(env, port) {
 
     // Safety net in case the server never logs the expected line at all
     // (e.g. it crashed) - don't hang the test suite forever.
-    setTimeout(finish, 5000);
+    setTimeout(finish, 8000);
   });
 }
 
@@ -54,5 +66,5 @@ describe('boot-time admin-user warning', () => {
     );
     expect(output).toMatch(/No admin users exist yet/);
     expect(output).toMatch(/npm run create-admin/);
-  });
+  }, 15_000);
 });
