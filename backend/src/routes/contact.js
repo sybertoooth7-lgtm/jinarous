@@ -3,11 +3,13 @@ import { body, validationResult } from 'express-validator';
 import db from '../db.js';
 import { recordContactAttempt, recordContactSuccess, recordHoneypotBlocked } from '../stats.js';
 import { sendContactNotification } from '../lib/email.js';
+import { contactLimiter } from '../middleware/rate-limit.js';
 
 const router = Router();
 
 router.post(
   '/',
+  contactLimiter,
   [
     // No .escape() here on purpose: dashboard.js already HTML-escapes every
     // field at render time via its own escapeHtml()/textContent. Escaping
