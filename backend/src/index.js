@@ -19,6 +19,18 @@ import { limiter, authLimiter } from './middleware/rate-limit.js';
 async function startServer() {
   const app = express();
 
+  // Railway, Vercel, and virtually every PaaS put the app behind one
+  // reverse-proxy hop. Without this, req.ip (and X-Forwarded-For) reflects
+  // the proxy's IP for every single visitor, not the real client's — which
+  // silently breaks IP-based rate limiting (everyone gets bucketed
+  // together under one "IP") the moment this actually deploys. `1` means
+  // "trust exactly one hop in front of us," which matches how these
+  // platforms are set up. Using `true` instead would trust every hop in
+  // an arbitrarily long chain, which is a spoofing risk if any hop before
+  // the real proxy is attacker-influenced — only trust as many hops as
+  // you actually know exist.
+  app.set('trust proxy', 1);
+
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
