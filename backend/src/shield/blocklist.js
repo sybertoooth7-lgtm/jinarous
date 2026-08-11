@@ -1,5 +1,6 @@
 // shield/blocklist.js
 import db from '../db.js';
+import { sendAlert } from '../monitoring.js';
 
 const DEFAULT_BLOCK_DURATIONS = {
   low: 15 * 60 * 1000,        // 15 min
@@ -7,6 +8,11 @@ const DEFAULT_BLOCK_DURATIONS = {
   high: 6 * 60 * 60 * 1000,   // 6 hours
   critical: 24 * 60 * 60 * 1000, // 24 hours
 };
+
+// Only alert for severities at or above this level, so routine low/medium
+// noise (a single odd request, a mild rate blip) doesn't spam the channel.
+// high and critical are the ones worth a human looking at right away.
+const ALERT_SEVERITIES = new Set(['high', 'critical']);
 
 /**
  * Checks if an IP is currently blocked (and not expired).
@@ -41,6 +47,16 @@ export async function blockIp(ip, reason, severity = 'medium') {
        severity = EXCLUDED.severity`,
     [ip, reason, severity, expiresAt]
   );
+
+  if (ALERT_SEVERITIES.has(severity)) {
+    // Throttle key is per-IP-per-severity, not per-message: an attacker
+    // retrying the same payload shouldn't generate a fresh alert every
+    // time just because hit_count changed in the message text.
+    await sendAlert(
+      `🛡️ Shield auto-blocked ${ip} (${severity}): ${reason}`,
+      `shield-block-${ip}-${severity}`
+    );
+  }
 }
 
 /**
