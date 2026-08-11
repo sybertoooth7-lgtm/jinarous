@@ -16,6 +16,7 @@ import statusRoutes from './routes/status.js';
 import toolsRoutes from './routes/tools.js';
 import { limiter, authLimiter } from './middleware/rate-limit.js';
 import { shield } from './middleware/shieldMiddleware.js';
+import { requireAuth } from './middleware/auth.js';
 import adminSecurityRoutes from './routes/adminSecurity.js';
 
 async function startServer() {
@@ -62,6 +63,12 @@ async function startServer() {
   app.use(cookieParser());
   app.use(express.json({ limit: '1mb' }));
 
+  // Shield: automatic request inspection (SQLi/XSS/path-traversal) and
+  // IP blocking. Registered right after body parsing so it can inspect
+  // req.body/query/params, and before any routes so blocked requests
+  // never reach route handlers.
+  app.use(shield);
+
   app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
@@ -101,6 +108,7 @@ async function startServer() {
   app.use('/api/admin', adminRoutes);
   app.use('/api/status', statusRoutes);
   app.use('/api/admin/tools', toolsRoutes);
+  app.use('/api/admin/security', requireAuth, adminSecurityRoutes);
   app.use('/admin', express.static('public/admin'));
 
   // Catch malformed request bodies as a plain 400 — not a 500, and not
