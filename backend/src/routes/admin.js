@@ -6,6 +6,7 @@ import { body, param, query, validationResult } from 'express-validator';
 import db from '../db.js';
 import { config } from '../config.js';
 import { requireAuth, blocklistToken } from '../middleware/auth.js';
+import { recordFailedLogin } from '../shield/bruteForceGuard.js';
 
 const router = Router();
 
@@ -49,6 +50,10 @@ router.post('/login', [
 
     const passwordMatches = await bcrypt.compare(password, user?.password_hash || DUMMY_HASH);
     if (!user || !passwordMatches) {
+      const nowBlocked = await recordFailedLogin(req.ip);
+      if (nowBlocked) {
+        return res.status(403).json({ error: 'Too many failed attempts. Access denied.' });
+      }
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
