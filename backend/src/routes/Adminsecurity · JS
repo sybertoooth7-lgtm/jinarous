@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import { listActiveBlocks, unblockIp } from '../shield/blocklist.js';
-import { pool } from '../db.js';
+import db from '../db.js';
 
 const router = Router();
 
@@ -51,12 +51,12 @@ router.get('/events', async (req, res) => {
 
   try {
     const result = type
-      ? await pool.query(
+      ? await db.query(
           `SELECT * FROM security_events WHERE event_type = $1
            ORDER BY created_at DESC LIMIT $2`,
           [type, limit]
         )
-      : await pool.query(
+      : await db.query(
           `SELECT * FROM security_events ORDER BY created_at DESC LIMIT $1`,
           [limit]
         );
