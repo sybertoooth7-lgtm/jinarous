@@ -15,6 +15,8 @@ import adminRoutes from './routes/admin.js';
 import statusRoutes from './routes/status.js';
 import toolsRoutes from './routes/tools.js';
 import { limiter, authLimiter } from './middleware/rate-limit.js';
+import { shield } from './middleware/shieldMiddleware.js';
+import adminSecurityRoutes from './routes/adminSecurity.js';
 
 async function startServer() {
   const app = express();
