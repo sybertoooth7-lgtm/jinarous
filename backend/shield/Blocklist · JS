@@ -1,8 +1,5 @@
 // shield/blocklist.js
-// IMPORTANT: adjust the import below to match your actual db pool path/export
-// (e.g. your existing rate limiter and token blocklist already import a pool
-// from somewhere — reuse the same import for consistency)
-import { pool } from '../db.js';
+import db from '../db.js';
 
 const DEFAULT_BLOCK_DURATIONS = {
   low: 15 * 60 * 1000,        // 15 min
@@ -15,7 +12,7 @@ const DEFAULT_BLOCK_DURATIONS = {
  * Checks if an IP is currently blocked (and not expired).
  */
 export async function isBlocked(ip) {
-  const result = await pool.query(
+  const result = await db.query(
     `SELECT id FROM blocked_ips
      WHERE ip_address = $1
        AND (expires_at IS NULL OR expires_at > NOW())
@@ -33,7 +30,7 @@ export async function blockIp(ip, reason, severity = 'medium') {
   const durationMs = DEFAULT_BLOCK_DURATIONS[severity] ?? DEFAULT_BLOCK_DURATIONS.medium;
   const expiresAt = new Date(Date.now() + durationMs);
 
-  await pool.query(
+  await db.query(
     `INSERT INTO blocked_ips (ip_address, reason, severity, expires_at, auto_blocked, hit_count)
      VALUES ($1, $2, $3, $4, TRUE, 1)
      ON CONFLICT (ip_address) WHERE expires_at IS NULL OR expires_at > NOW()
@@ -50,7 +47,7 @@ export async function blockIp(ip, reason, severity = 'medium') {
  * Manually unblock an IP (e.g. after confirming a false positive).
  */
 export async function unblockIp(ip) {
-  await pool.query(
+  await db.query(
     `UPDATE blocked_ips SET expires_at = NOW() WHERE ip_address = $1`,
     [ip]
   );
@@ -60,7 +57,7 @@ export async function unblockIp(ip) {
  * Returns currently active blocks, most recent first — useful for an admin endpoint.
  */
 export async function listActiveBlocks(limit = 100) {
-  const result = await pool.query(
+  const result = await db.query(
     `SELECT ip_address, reason, severity, blocked_at, expires_at, hit_count
      FROM blocked_ips
      WHERE expires_at IS NULL OR expires_at > NOW()
