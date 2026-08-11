@@ -1,7 +1,5 @@
--- Migration: Shield module tables
--- Adjust the migration filename/number to match your existing migration sequence
--- (you mentioned GitHub's web editor has caused filename ordering issues before —
--- double check this lands after your latest migration, e.g. rename to 00X_ before pasting)
+-- Migration: Shield module tables (011)
+-- This is migration 011 — comes after your existing 010_alter_tool_runs_columns.sql
 
 CREATE TABLE IF NOT EXISTS blocked_ips (
   id SERIAL PRIMARY KEY,
