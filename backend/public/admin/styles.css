@@ -138,3 +138,32 @@ tr:hover { background: #fafafa; }
   margin-top: 24px;
 }
 #page-info { font-size: 14px; color: #666; }
+/* ---------- Security (Shield) tab additions ---------- */
+
+.tab-nav {
+  display: flex;
+  gap: 4px;
+}
+.tab-btn {
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: #666;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.tab-btn:hover { background: #f0f0f0; }
+.tab-btn.active { background: #1976d2; color: #fff; }
+
+.section-heading {
+  margin: 24px 0 12px;
+  font-size: 16px;
+  color: #333;
+}
+
+.badge-severity-low { background: #eceff1; color: #546e7a; }
+.badge-severity-medium { background: #fff8e1; color: #f57f17; }
+.badge-severity-high { background: #fff3e0; color: #e65100; }
+.badge-severity-critical { background: #ffebee; color: #c62828; }
