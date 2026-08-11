@@ -31,14 +31,19 @@
     <!-- Dashboard Screen -->
     <div id="dashboard-screen" class="screen hidden">
       <header class="topbar">
-        <h2>Contact Submissions</h2>
+        <h2 id="panel-title">Contact Submissions</h2>
+        <nav class="tab-nav">
+          <button id="tab-submissions" class="tab-btn active">Submissions</button>
+          <button id="tab-security" class="tab-btn">Security</button>
+        </nav>
         <div class="topbar-actions">
           <span id="user-email"></span>
           <button id="logout-btn" class="btn-secondary">Logout</button>
         </div>
       </header>
 
-      <main class="dashboard-main">
+      <!-- Submissions Panel -->
+      <main class="dashboard-main" id="submissions-panel">
         <!-- Filters -->
         <div class="filters">
           <input type="text" id="search-input" placeholder="Search name, email, company, message...">
@@ -90,6 +95,73 @@
           <button id="prev-page" class="btn-secondary">← Prev</button>
           <span id="page-info">Page 1 of 1</span>
           <button id="next-page" class="btn-secondary">Next →</button>
+        </div>
+      </main>
+
+      <!-- Security Panel (Shield) -->
+      <main class="dashboard-main hidden" id="security-panel">
+        <!-- Stats -->
+        <div class="stats-bar">
+          <div class="stat">
+            <span class="stat-value" id="stat-active-blocks">0</span>
+            <span class="stat-label">Active Blocks</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="stat-recent-events">0</span>
+            <span class="stat-label">Recent Events</span>
+          </div>
+          <button id="refresh-security" class="btn-secondary">Refresh</button>
+        </div>
+
+        <h3 class="section-heading">Active Blocks</h3>
+        <div class="table-wrapper">
+          <table id="blocks-table">
+            <thead>
+              <tr>
+                <th>IP Address</th>
+                <th>Reason</th>
+                <th>Severity</th>
+                <th>Blocked At</th>
+                <th>Expires</th>
+                <th>Hits</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="blocks-body">
+              <!-- Rendered by JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="section-heading">Recent Events</h3>
+        <div class="filters">
+          <select id="event-type-filter">
+            <option value="">All Types</option>
+            <option value="sqli">SQL Injection</option>
+            <option value="xss">XSS</option>
+            <option value="path_traversal">Path Traversal</option>
+            <option value="brute_force">Brute Force</option>
+            <option value="rate_abuse">Rate Abuse</option>
+          </select>
+          <button id="apply-event-filter" class="btn-primary">Filter</button>
+        </div>
+        <div class="table-wrapper">
+          <table id="events-table">
+            <thead>
+              <tr>
+                <th>IP Address</th>
+                <th>Type</th>
+                <th>Severity</th>
+                <th>Path</th>
+                <th>Method</th>
+                <th>Blocked</th>
+                <th>When</th>
+              </tr>
+            </thead>
+            <tbody id="events-body">
+              <!-- Rendered by JS -->
+            </tbody>
+          </table>
         </div>
       </main>
     </div>
