@@ -14,7 +14,12 @@ let state = {
   total: 0,
   totalPages: 1,
   statusFilter: '',
-  searchQuery: ''
+  searchQuery: '',
+  // Security (Shield) state
+  activeTab: 'submissions',
+  blocks: [],
+  events: [],
+  eventTypeFilter: ''
 };
 
 /* ---------- Helpers ---------- */
@@ -115,6 +120,107 @@ function renderPagination() {
   $('next-page').disabled = state.page >= state.totalPages;
 }
 
+/* ---------- Security (Shield) Rendering ---------- */
+
+function renderBlocks() {
+  const tbody = $('blocks-body');
+  tbody.innerHTML = ''; // Safe: clearing own container
+  $('stat-active-blocks').textContent = state.blocks.length;
+
+  if (state.blocks.length === 0) {
+    const tr = document.createElement('tr');
+    const td = createEl('td', 'No active blocks.');
+    td.colSpan = 7;
+    td.style.textAlign = 'center';
+    td.style.padding = '24px';
+    td.style.color = '#666';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  state.blocks.forEach(block => {
+    const tr = document.createElement('tr');
+
+    tr.appendChild(createEl('td', block.ip_address));
+    tr.appendChild(createEl('td', block.reason));
+
+    const sevTd = createEl('td', '');
+    sevTd.appendChild(createEl('span', block.severity, `badge badge-severity-${block.severity}`));
+    tr.appendChild(sevTd);
+
+    tr.appendChild(createEl('td', formatDate(block.blocked_at)));
+    tr.appendChild(createEl('td', block.expires_at ? formatDate(block.expires_at) : 'Permanent'));
+    tr.appendChild(createEl('td', String(block.hit_count)));
+
+    const actionsTd = createEl('td', '');
+    actionsTd.className = 'actions-cell';
+    const unblockBtn = createEl('button', 'Unblock', 'btn-danger');
+    unblockBtn.addEventListener('click', () => unblockIp(block.ip_address));
+    actionsTd.appendChild(unblockBtn);
+    tr.appendChild(actionsTd);
+
+    tbody.appendChild(tr);
+  });
+}
+
+function renderEvents() {
+  const tbody = $('events-body');
+  tbody.innerHTML = ''; // Safe: clearing own container
+  $('stat-recent-events').textContent = state.events.length;
+
+  if (state.events.length === 0) {
+    const tr = document.createElement('tr');
+    const td = createEl('td', 'No recent events.');
+    td.colSpan = 7;
+    td.style.textAlign = 'center';
+    td.style.padding = '24px';
+    td.style.color = '#666';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+
+  state.events.forEach(ev => {
+    const tr = document.createElement('tr');
+
+    tr.appendChild(createEl('td', ev.ip_address));
+    tr.appendChild(createEl('td', ev.event_type));
+
+    const sevTd = createEl('td', '');
+    sevTd.appendChild(createEl('span', ev.severity, `badge badge-severity-${ev.severity}`));
+    tr.appendChild(sevTd);
+
+    const pathTd = createEl('td', truncate(ev.request_path || '-', 60));
+    pathTd.title = ev.request_path || '';
+    tr.appendChild(pathTd);
+
+    tr.appendChild(createEl('td', ev.request_method || '-'));
+    tr.appendChild(createEl('td', ev.blocked ? 'Yes' : 'No'));
+    tr.appendChild(createEl('td', formatDate(ev.created_at)));
+
+    tbody.appendChild(tr);
+  });
+}
+
+/* ---------- Tab Switching ---------- */
+
+function switchTab(tab) {
+  state.activeTab = tab;
+
+  $('tab-submissions').classList.toggle('active', tab === 'submissions');
+  $('tab-security').classList.toggle('active', tab === 'security');
+
+  $('submissions-panel').classList.toggle('hidden', tab !== 'submissions');
+  $('security-panel').classList.toggle('hidden', tab !== 'security');
+
+  $('panel-title').textContent = tab === 'submissions' ? 'Contact Submissions' : 'Security — Shield';
+
+  if (tab === 'security') {
+    fetchSecurityData();
+  }
+}
+
 /* ---------- API Calls ---------- */
 
 async function api(path, opts = {}) {
@@ -176,6 +282,40 @@ async function deleteSubmission(id) {
     await fetchSubmissions();
   } catch (err) {
     alert('Failed to delete: ' + err.message);
+  }
+}
+
+async function fetchBlocks() {
+  const data = await api(`${API_BASE}/security/blocks`);
+  state.blocks = data.blocks || [];
+  renderBlocks();
+}
+
+async function fetchEvents() {
+  const params = new URLSearchParams();
+  params.set('limit', '50');
+  if (state.eventTypeFilter) params.set('type', state.eventTypeFilter);
+
+  const data = await api(`${API_BASE}/security/events?${params}`);
+  state.events = data.events || [];
+  renderEvents();
+}
+
+async function fetchSecurityData() {
+  try {
+    await Promise.all([fetchBlocks(), fetchEvents()]);
+  } catch (err) {
+    alert('Failed to load security data: ' + err.message);
+  }
+}
+
+async function unblockIp(ip) {
+  if (!confirm(`Unblock ${ip}? Only do this if you've confirmed it's a false positive.`)) return;
+  try {
+    await api(`${API_BASE}/security/blocks/${encodeURIComponent(ip)}/unblock`, { method: 'POST' });
+    await fetchBlocks();
+  } catch (err) {
+    alert('Failed to unblock: ' + err.message);
   }
 }
 
@@ -244,6 +384,15 @@ $('next-page').addEventListener('click', () => {
     state.page++;
     fetchSubmissions();
   }
+});
+
+$('tab-submissions').addEventListener('click', () => switchTab('submissions'));
+$('tab-security').addEventListener('click', () => switchTab('security'));
+$('refresh-security').addEventListener('click', fetchSecurityData);
+
+$('apply-event-filter').addEventListener('click', () => {
+  state.eventTypeFilter = $('event-type-filter').value;
+  fetchEvents();
 });
 
 /* ---------- Init ---------- */
