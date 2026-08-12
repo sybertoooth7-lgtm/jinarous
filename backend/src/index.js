@@ -18,6 +18,10 @@ import { limiter, authLimiter } from './middleware/rate-limit.js';
 import { shield } from './middleware/shieldMiddleware.js';
 import { requireAuth } from './middleware/auth.js';
 import adminSecurityRoutes from './routes/adminSecurity.js';
+import clientAuthRoutes from './routes/clientAuth.js';
+import complianceRoutes from './routes/compliance.js';
+import adminClientsRoutes from './routes/adminClients.js';
+import { requireClientAuth } from './middleware/clientAuth.js';
 
 async function startServer() {
   const app = express();
