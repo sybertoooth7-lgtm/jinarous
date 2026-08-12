@@ -1,9 +1,8 @@
--- Migration: Shield module tables (011)
--- This is migration 011 — comes after your existing 010_alter_tool_runs_columns.sql
+-- Migration 011: Shield module tables
 
 CREATE TABLE IF NOT EXISTS blocked_ips (
   id SERIAL PRIMARY KEY,
-  ip_address VARCHAR(45) NOT NULL,
+  ip_address VARCHAR(45) NOT NULL UNIQUE,
   reason VARCHAR(255) NOT NULL,
   severity VARCHAR(20) NOT NULL DEFAULT 'medium', -- low | medium | high | critical
   blocked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -12,11 +11,20 @@ CREATE TABLE IF NOT EXISTS blocked_ips (
   hit_count INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_blocked_ips_active
-  ON blocked_ips (ip_address)
-  WHERE expires_at IS NULL OR expires_at > NOW();
-
-CREATE INDEX IF NOT EXISTS idx_blocked_ips_lookup ON blocked_ips (ip_address);
+-- One row per IP, ever. "Is this IP currently blocked?" is answered by
+-- checking expires_at at query time (see idx_blocked_ips_lookup below),
+-- not by the uniqueness constraint itself.
+--
+-- NOTE: an earlier version of this migration tried a partial unique index
+-- with `WHERE expires_at IS NULL OR expires_at > NOW()`, matching the
+-- ON CONFLICT clause in blocklist.js. Postgres rejects that: index
+-- predicates must be IMMUTABLE, and NOW() is not — its value changes
+-- between calls, so it can't be baked into an index definition. Using a
+-- plain UNIQUE(ip_address) instead sidesteps the issue entirely: an IP
+-- that reoffends after its previous block expired just gets its existing
+-- row updated in place (see blockIp() in blocklist.js), which is the
+-- correct behavior anyway.
+CREATE INDEX IF NOT EXISTS idx_blocked_ips_lookup ON blocked_ips (ip_address, expires_at);
 
 CREATE TABLE IF NOT EXISTS security_events (
   id SERIAL PRIMARY KEY,
