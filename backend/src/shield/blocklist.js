@@ -11,7 +11,6 @@ const DEFAULT_BLOCK_DURATIONS = {
 
 // Only alert for severities at or above this level, so routine low/medium
 // noise (a single odd request, a mild rate blip) doesn't spam the channel.
-// high and critical are the ones worth a human looking at right away.
 const ALERT_SEVERITIES = new Set(['high', 'critical']);
 
 /**
@@ -29,8 +28,13 @@ export async function isBlocked(ip) {
 }
 
 /**
- * Blocks an IP automatically. If already blocked, extends/refreshes the block
- * and increments hit_count instead of creating a duplicate row.
+ * Blocks an IP automatically. blocked_ips has a plain UNIQUE(ip_address)
+ * constraint (see migration 011) — one row per IP ever, not one row per
+ * active block. So this always "upserts" onto that single row: a
+ * previously-expired block on this IP gets its expiry pushed forward
+ * again rather than a new row being created. hit_count accumulates
+ * across the IP's entire history, which is useful signal (a repeat
+ * offender vs. a first-time trip).
  */
 export async function blockIp(ip, reason, severity = 'medium') {
   const durationMs = DEFAULT_BLOCK_DURATIONS[severity] ?? DEFAULT_BLOCK_DURATIONS.medium;
@@ -39,7 +43,7 @@ export async function blockIp(ip, reason, severity = 'medium') {
   await db.query(
     `INSERT INTO blocked_ips (ip_address, reason, severity, expires_at, auto_blocked, hit_count)
      VALUES ($1, $2, $3, $4, TRUE, 1)
-     ON CONFLICT (ip_address) WHERE expires_at IS NULL OR expires_at > NOW()
+     ON CONFLICT (ip_address)
      DO UPDATE SET
        expires_at = EXCLUDED.expires_at,
        hit_count = blocked_ips.hit_count + 1,
@@ -49,9 +53,6 @@ export async function blockIp(ip, reason, severity = 'medium') {
   );
 
   if (ALERT_SEVERITIES.has(severity)) {
-    // Throttle key is per-IP-per-severity, not per-message: an attacker
-    // retrying the same payload shouldn't generate a fresh alert every
-    // time just because hit_count changed in the message text.
     await sendAlert(
       `🛡️ Shield auto-blocked ${ip} (${severity}): ${reason}`,
       `shield-block-${ip}-${severity}`
