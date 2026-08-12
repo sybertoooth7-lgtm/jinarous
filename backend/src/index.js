@@ -113,6 +113,9 @@ async function startServer() {
   app.use('/api/status', statusRoutes);
   app.use('/api/admin/tools', toolsRoutes);
   app.use('/api/admin/security', requireAuth, adminSecurityRoutes);
+  app.use('/api/client', clientAuthRoutes);
+  app.use('/api/client/compliance', requireClientAuth, complianceRoutes);
+  app.use('/api/admin/clients', requireAuth, adminClientsRoutes);
   app.use('/admin', express.static('public/admin'));
 
   // Catch malformed request bodies as a plain 400 — not a 500, and not
