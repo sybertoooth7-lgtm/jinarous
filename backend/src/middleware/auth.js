@@ -48,6 +48,19 @@ export async function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
   }
 
+  // Admin and client tokens are signed with the same JWT_SECRET, so a
+  // cryptographically valid client token would otherwise pass verification
+  // here too. Without this check, a client token would be decoded and
+  // treated as `req.user`, and only fail later (e.g. an admin_users lookup
+  // returning no row) — or worse, succeed outright if a client's `sub` ID
+  // happened to collide with a real admin's ID in admin_users. Client
+  // tokens carry `role: 'client'` (see routes/clientAuth.js); real admin
+  // tokens carry no `role` claim at all, so this rejects any token that
+  // isn't unambiguously an admin token.
+  if (decoded.role === 'client') {
+    return res.status(401).json({ error: 'Unauthorized: Wrong token type' });
+  }
+
   if (decoded.jti && await isBlocklisted(decoded.jti)) {
     return res.status(401).json({ error: 'Unauthorized: Token has been revoked' });
   }
