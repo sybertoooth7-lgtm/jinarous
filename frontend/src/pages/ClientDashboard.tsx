@@ -31,6 +31,7 @@ export default function ClientDashboard() {
   const navigate = useNavigate();
   const [client, setClient] = useState<ClientInfo | null>(null);
   const [frameworks, setFrameworks] = useState<Record<string, ComplianceItem[]>>({});
+  const [score, setScore] = useState<{ score: number | null; label: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -50,6 +51,12 @@ export default function ClientDashboard() {
         if (!complianceRes.ok) throw new Error('Failed to load compliance status.');
         const complianceData = await complianceRes.json();
         setFrameworks(complianceData.frameworks || {});
+
+        const scoreRes = await fetch(`${API_BASE}/api/client/risk-score`, { credentials: 'include' });
+        if (scoreRes.ok) {
+          const scoreData = await scoreRes.json();
+          setScore({ score: scoreData.score, label: scoreData.label });
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Something went wrong.');
       } finally {
@@ -100,6 +107,19 @@ export default function ClientDashboard() {
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-10">
+        {score && score.score !== null && (
+          <div className="bg-navy-surface border border-alux-gold/20 rounded-2xl p-6 mb-6 flex items-center justify-between">
+            <div>
+              <p className="text-white/50 text-sm mb-1">Your Risk Score</p>
+              <p className="text-3xl font-bold font-mono">{score.score}<span className="text-white/30 text-lg">/100</span></p>
+              <p className="text-sm text-alux-gold mt-1">{score.label}</p>
+            </div>
+            <p className="text-xs text-white/40 max-w-[180px] text-right">
+              Ask your admin for a shareable verification link to send to banks or partners.
+            </p>
+          </div>
+        )}
+
         <div className="mb-8">
           <p className="text-white/60">
             {passingCount} of {allItems.length} checklist items currently passing.
