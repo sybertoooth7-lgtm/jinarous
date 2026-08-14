@@ -1,18 +1,8 @@
-// backend/src/middleware/helmetConfig.js
-// Strict Helmet + CSP with nonce. Import and use this in index.js.
-
 import helmet from 'helmet';
-import crypto from 'crypto';
+import { randomBytes } from 'crypto';
 
-export function generateNonce() {
-  return crypto.randomBytes(16).toString('base64');
-}
-
-/**
- * Attach this BEFORE helmet() to generate a nonce per request.
- */
 export function attachCspNonce(req, res, next) {
-  res.locals.cspNonce = generateNonce();
+  res.locals.cspNonce = randomBytes(16).toString('base64');
   next();
 }
 
@@ -20,12 +10,10 @@ export const helmetMiddleware = helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: [
-        "'self'",
-        (req, res) => `'nonce-${res.locals.cspNonce}'`,
-      ],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", 'data:', 'blob:'],
+      scriptSrc: ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`],
+      styleSrc: ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'"],
       fontSrc: ["'self'"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
@@ -34,11 +22,10 @@ export const helmetMiddleware = helmet({
       upgradeInsecureRequests: [],
     },
   },
+  crossOriginEmbedderPolicy: false,
   hsts: {
     maxAge: 31536000,
     includeSubDomains: true,
     preload: true,
   },
-  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-  crossOriginEmbedderPolicy: false,
 });
