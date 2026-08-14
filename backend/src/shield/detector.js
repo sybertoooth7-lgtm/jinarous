@@ -1,22 +1,26 @@
 // shield/detector.js
-// Pattern-based request inspection for common injection attacks.
-// This is signature-based detection — fast and dependency-free, but not
-// a substitute for parameterized queries / output encoding, which you
-// should already have. Shield is a second layer, not the only layer.
+// Pattern-based request inspection with evasion-resistant normalization.
+// Normalization runs BEFORE pattern matching so encoded/obfuscated
+// payloads still get caught.
 
 const SQLI_PATTERNS = [
-  { name: 'sql_union', regex: /\bunion\b.{0,40}\bselect\b/i },
+  { name: 'sql_union', regex: /\bunion\b.*?\bselect\b/i },
   { name: 'sql_or_injection', regex: /\bor\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+['"]?/i },
   { name: 'sql_comment', regex: /(--|#|\/\*)\s*$/ },
-  { name: 'sql_stacked', regex: /;\s*(drop|delete|insert|update)\s+/i },
+  { name: 'sql_stacked', regex: /;\s*(drop|delete|insert|update|alter|create)\s+/i },
   { name: 'sql_sleep', regex: /\b(sleep|benchmark|pg_sleep|waitfor\s+delay)\s*\(/i },
+  { name: 'sql_into_outfile', regex: /\binto\s+(outfile|dumpfile)\b/i },
+  { name: 'sql_exec', regex: /\bexec\s*\(/i },
+  { name: 'sql_information_schema', regex: /\b(information_schema|sysdatabases|sysobjects)\b/i },
 ];
 
 const XSS_PATTERNS = [
-  { name: 'xss_script_tag', regex: /<script[\s\S]*?>/i },
-  { name: 'xss_event_handler', regex: /on(error|load|click|mouseover)\s*=/i },
+  { name: 'xss_script_tag', regex: /<script[\s\S]*?>[\s\S]*?<\/script>/i },
+  { name: 'xss_event_handler', regex: /on\w+\s*=/i },
   { name: 'xss_javascript_uri', regex: /javascript\s*:/i },
-  { name: 'xss_iframe', regex: /<iframe[\s\S]*?>/i },
+  { name: 'xss_iframe', regex: /<iframe[\s\S]*?>[\s\S]*?<\/iframe>/i },
+  { name: 'xss_vbscript', regex: /vbscript\s*:/i },
+  { name: 'xss_expression', regex: /expression\s*\(/i },
 ];
 
 const PATH_TRAVERSAL_PATTERNS = [
@@ -31,15 +35,68 @@ const ALL_PATTERNS = [
 ];
 
 /**
- * Flattens req.query, req.body, req.params into a single string for scanning.
- * Keeps it shallow/cheap — deep recursive scanning is a future improvement.
+ * Evasion-resistant normalization pipeline.
+ * Runs before pattern matching so encoded/obfuscated attacks still hit.
+ */
+function normalizeInput(input) {
+  if (input == null) return '';
+  let s = String(input);
+
+  // 1. Recursive URL-decode (up to 3 levels — prevents ReDoS from infinite %25 loops)
+  for (let i = 0; i < 3; i++) {
+    try {
+      const decoded = decodeURIComponent(s);
+      if (decoded === s) break;
+      s = decoded;
+    } catch {
+      break; // malformed URI sequence
+    }
+  }
+
+  // 2. HTML entity decode (numeric + named)
+  s = s
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&amp;/gi, '&');
+
+  // 3. Unicode NFKC normalization (catches homoglyphs / compatibility chars)
+  s = s.normalize('NFKC');
+
+  // 4. Lowercase
+  s = s.toLowerCase();
+
+  // 5. Remove null bytes
+  s = s.replace(/\0/g, '');
+
+  // 6. Strip SQL comments
+  s = s.replace(/\/\*[\s\S]*?\*\//g, ' ')   // /* ... */
+       .replace(/--[^\n]*/g, ' ')            // -- ...
+       .replace(/#[^\n]*/g, ' ');            // # ...
+
+  // 7. Decode hex/unicode escapes commonly used in obfuscation
+  s = s.replace(/\\x([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+       .replace(/\\u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+
+  // 8. Collapse all whitespace to single spaces
+  s = s.replace(/\s+/g, ' ');
+
+  return s.trim();
+}
+
+/**
+ * Flattens req.query, req.body, req.params, req.originalUrl into a
+ * single normalized string for scanning.
  */
 function extractScannableContent(req) {
   const parts = [];
-  if (req.query) parts.push(JSON.stringify(req.query));
-  if (req.body) parts.push(JSON.stringify(req.body));
-  if (req.params) parts.push(JSON.stringify(req.params));
-  if (req.originalUrl) parts.push(req.originalUrl);
+  if (req.query) parts.push(normalizeInput(JSON.stringify(req.query)));
+  if (req.body) parts.push(normalizeInput(JSON.stringify(req.body)));
+  if (req.params) parts.push(normalizeInput(JSON.stringify(req.params)));
+  if (req.originalUrl) parts.push(normalizeInput(req.originalUrl));
   return parts.join(' ');
 }
 
@@ -58,7 +115,7 @@ export function scanRequest(req) {
         eventType: pattern.category,
         matchedPattern: pattern.name,
         severity: pattern.severity,
-        snippet: match[0].slice(0, 100), // truncated for storage
+        snippet: match[0].slice(0, 100),
       };
     }
   }
