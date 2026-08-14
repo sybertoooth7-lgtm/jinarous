@@ -1,6 +1,5 @@
 import express from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import cluster from 'cluster';
 import os from 'os';
@@ -14,7 +13,8 @@ import contactRoutes from './routes/contact.js';
 import adminRoutes from './routes/admin.js';
 import statusRoutes from './routes/status.js';
 import toolsRoutes from './routes/tools.js';
-import { limiter, authLimiter } from './middleware/rate-limit.js';
+import { limiter, authLimiter, contactLimiter } from './middleware/rate-limit.js';
+import { adaptiveLimiter, strictAuthLimiter } from './middleware/adaptiveRateLimit.js';
 import { shield } from './middleware/shieldMiddleware.js';
 import { requireAuth } from './middleware/auth.js';
 import adminSecurityRoutes from './routes/adminSecurity.js';
@@ -26,40 +26,20 @@ import clientRiskScoreRoutes from './routes/clientRiskScore.js';
 import adminRiskScoreRoutes from './routes/adminRiskScore.js';
 import verifyScoreRoutes from './routes/verifyScore.js';
 import clientSecurityEventsRoutes from './routes/clientSecurityEvents.js';
+import { setCsrfCookie, verifyCsrfToken } from './middleware/csrf.js';
+import { attachCspNonce, helmetMiddleware } from './middleware/helmetConfig.js';
 
 async function startServer() {
   const app = express();
 
-  // Railway, Vercel, and virtually every PaaS put the app behind one
-  // reverse-proxy hop. Without this, req.ip (and X-Forwarded-For) reflects
-  // the proxy's IP for every single visitor, not the real client's — which
-  // silently breaks IP-based rate limiting (everyone gets bucketed
-  // together under one "IP") the moment this actually deploys. `1` means
-  // "trust exactly one hop in front of us," which matches how these
-  // platforms are set up. Using `true` instead would trust every hop in
-  // an arbitrarily long chain, which is a spoofing risk if any hop before
-  // the real proxy is attacker-influenced — only trust as many hops as
-  // you actually know exist.
   app.set('trust proxy', 1);
 
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:'],
-        objectSrc: ["'none'"],
-        frameAncestors: ["'none'"],
-      },
-    },
-  }));
+  // 1. Helmet + nonce-based CSP
+  app.use(attachCspNonce);
+  app.use(helmetMiddleware);
 
-  // config.corsOrigins is already a parsed, trimmed array from config.js —
-  // a previous version of this file tried to read config.corsOrigin
-  // (singular, a field that doesn't exist) and always silently fell back
-  // to localhost regardless of what CORS_ORIGIN was actually set to.
-  const allowedOrigins = config.corsOrigins.length > 0
+  // 2. CORS
+  const allowedOrigins = config.corsOrigins?.length > 0
     ? config.corsOrigins
     : ['http://localhost:3000'];
 
@@ -68,15 +48,19 @@ async function startServer() {
     credentials: true,
   }));
 
+  // 3. Cookie parser (before CSRF)
   app.use(cookieParser());
+
+  // 4. CSRF cookie
+  app.use(setCsrfCookie);
+
+  // 5. Body parsing
   app.use(express.json({ limit: '1mb' }));
 
-  // Shield: automatic request inspection (SQLi/XSS/path-traversal) and
-  // IP blocking. Registered right after body parsing so it can inspect
-  // req.body/query/params, and before any routes so blocked requests
-  // never reach route handlers.
+  // 6. Shield
   app.use(shield);
 
+  // 7. Metrics
   app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
@@ -94,13 +78,14 @@ async function startServer() {
     },
   }));
 
-  // Shallow — just confirms the process is up and answering HTTP requests.
+  // 8. CSRF verification
+  app.use(verifyCsrfToken);
+
+  // Health
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
   });
 
-  // Deep — actually queries the database. Point real uptime monitoring at
-  // this one; the shallow check above returns 200 even if the DB is down.
   app.get('/api/health/deep', async (req, res) => {
     try {
       await db.query('SELECT 1');
@@ -110,8 +95,13 @@ async function startServer() {
     }
   });
 
-  app.use('/api', limiter);
-  app.use('/api/admin/login', authLimiter);
+  // Rate limits
+  app.use('/api', adaptiveLimiter);
+  app.use('/api/admin/login', strictAuthLimiter);
+  app.use('/api/client/login', strictAuthLimiter);
+  app.use('/api/contact', contactLimiter);
+
+  // Routes
   app.use('/api/contact', contactRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/status', statusRoutes);
@@ -121,14 +111,16 @@ async function startServer() {
   app.use('/api/client/compliance', requireClientAuth, complianceRoutes);
   app.use('/api/admin/clients', requireAuth, adminClientsRoutes);
   app.use('/admin', express.static('public/admin'));
+
+  // NOTE: adminRiskScoreRoutes must be an Express Router with { mergeParams: true }
+  // to access req.params.id defined in this mount path.
   app.use('/api/admin/clients/:id/risk-score-shares', requireAuth, adminRiskScoreRoutes);
+
   app.use('/api/client/risk-score', requireClientAuth, clientRiskScoreRoutes);
   app.use('/api/verify', verifyScoreRoutes);
   app.use('/api/client/security-events', requireClientAuth, clientSecurityEventsRoutes);
 
-  // Catch malformed request bodies as a plain 400 — not a 500, and not
-  // reported to error tracking. A client sending broken JSON isn't a
-  // server error, and treating it as one pollutes real error signal.
+  // Error handler
   app.use((err, req, res, next) => {
     if (err.type === 'entity.parse.failed') {
       return res.status(400).json({ error: 'Malformed request body' });
@@ -136,7 +128,7 @@ async function startServer() {
     captureError(err, { path: req.path, method: req.method });
     sendAlert(
       `Unhandled error on ${req.method} ${req.path}: ${err.message}`,
-      `${req.method} ${req.path}` // throttle key: bounded by route count, not by err.message
+      `${req.method} ${req.path}`
     ).catch(() => {});
     console.error(err);
     res.status(500).json({ error: 'Internal server error' });
@@ -148,9 +140,19 @@ async function startServer() {
 
   const statsInterval = setInterval(persistStats, 10_000);
 
+  // Cleanup expired client sessions every 10 minutes
+  const sessionCleanupInterval = setInterval(async () => {
+    try {
+      await db.query('DELETE FROM client_sessions WHERE expires_at < NOW()');
+    } catch (err) {
+      logger.error({ err }, 'Session cleanup failed');
+    }
+  }, 10 * 60 * 1000);
+
   async function shutdown(signal) {
     logger.info(`${signal} received, shutting down gracefully`);
     clearInterval(statsInterval);
+    clearInterval(sessionCleanupInterval);
     await persistStats();
     server.close(async () => {
       await db.end().catch(() => {});
@@ -164,9 +166,6 @@ async function startServer() {
 }
 
 async function main() {
-  // config.js already prints its own warnings/errors as a side effect of
-  // being imported (and exits the process for hard errors), so there's
-  // nothing more to do with them here.
   await initDb();
   initErrorTracking();
   await loadPersistedValues();
