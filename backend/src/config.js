@@ -2,10 +2,54 @@ const isProduction = process.env.NODE_ENV === 'production';
 const errors = [];
 const warnings = [];
 
+function calculateEntropy(str) {
+  const len = str.length;
+  if (len === 0) return 0;
+  const freq = {};
+  for (const ch of str) {
+    freq[ch] = (freq[ch] || 0) + 1;
+  }
+  let entropy = 0;
+  for (const count of Object.values(freq)) {
+    const p = count / len;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
+
+const WEAK_SECRET_PATTERNS = [
+  'secret', 'jwtsecret', 'changeme', 'password', 'admin', '123456',
+  'default', 'test', 'dev', 'local', 'mysecret', 'your-256-bit-secret',
+  'supersecret', 'secretkey', 'privatekey', 'token', 'auth', 'password123',
+];
+
 if (!process.env.JWT_SECRET) {
-  errors.push('JWT_SECRET is not set. Admin login will fail on every request.');
-} else if (process.env.JWT_SECRET.length < 32) {
-  warnings.push(`JWT_SECRET is only ${process.env.JWT_SECRET.length} chars — use 32+ bytes.`);
+  errors.push('JWT_SECRET is not set. Admin and client login will fail on every request.');
+} else {
+  const secret = process.env.JWT_SECRET;
+
+  if (secret.length < 32) {
+    errors.push(`JWT_SECRET is only ${secret.length} chars — minimum 32 required.`);
+  }
+
+  const entropy = calculateEntropy(secret);
+  if (entropy < 3.5) {
+    errors.push(
+      `JWT_SECRET entropy is ${entropy.toFixed(2)} bits/char — minimum 3.5 required. ` +
+      `Generate it with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
+    );
+  }
+
+  const lower = secret.toLowerCase();
+  for (const weak of WEAK_SECRET_PATTERNS) {
+    if (lower.includes(weak)) {
+      errors.push(
+        `JWT_SECRET contains weak pattern '${weak}'. ` +
+        `Use a cryptographically random string, not a dictionary word.`
+      );
+      break;
+    }
+  }
 }
 
 if (!process.env.DATABASE_URL) {
@@ -33,13 +77,13 @@ if (isProduction) {
 
 if (errors.length > 0) {
   console.error('\n[config] Refusing to start:\n');
-  for (const e of errors) console.error(`  - ${e}`);
+  for (const e of errors) console.error(` - ${e}`);
   process.exit(1);
 }
 
 if (warnings.length > 0) {
   console.warn('\n[config] Warnings:\n');
-  for (const w of warnings) console.warn(`  - ${w}`);
+  for (const w of warnings) console.warn(` - ${w}`);
 }
 
 export const config = {
