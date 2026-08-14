@@ -1,7 +1,4 @@
-// backend/src/routes/clientAuth.js — ENHANCED VERSION
-// Adds login audit logging, new-device detection, and CSRF/honeypot checks.
-// Does NOT include broken request signing or unstable device fingerprinting.
-
+// backend/src/routes/clientAuth.js
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -31,6 +28,21 @@ function parseExpiryToMs(value, fallbackMs) {
 
 const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 8 * 60 * 60 * 1000);
 
+// Account lockout config
+const MAX_FAILED_ATTEMPTS = 5;
+const BASE_LOCKOUT_MINUTES = 15;
+const MAX_LOCKOUT_MINUTES = 360; // 6 hours
+
+/**
+ * Compute lockout duration with exponential backoff.
+ * 5 fails → 15 min, 6 → 30 min, 7 → 60 min, capped at 6 hrs.
+ */
+function computeLockoutMinutes(failedCount) {
+  if (failedCount < MAX_FAILED_ATTEMPTS) return 0;
+  const minutes = BASE_LOCKOUT_MINUTES * Math.pow(2, failedCount - MAX_FAILED_ATTEMPTS);
+  return Math.min(minutes, MAX_LOCKOUT_MINUTES);
+}
+
 /**
  * POST /api/client/login
  */
@@ -45,7 +57,7 @@ router.post('/login', [
 
   const { email, password } = req.body;
 
-  // Honeypot check: if the hidden field is filled, silently reject
+  // Honeypot check
   if (req.body.website_url && req.body.website_url.trim().length > 0) {
     return res.status(400).json({ error: 'Invalid request' });
   }
@@ -54,8 +66,18 @@ router.post('/login', [
     const result = await db.query('SELECT * FROM clients WHERE email = $1', [email]);
     const client = result.rows[0];
 
+    // Account-level lockout check (before password verify to save CPU)
+    if (client?.locked_until && new Date(client.locked_until) > new Date()) {
+      const remainingSec = Math.ceil((new Date(client.locked_until) - new Date()) / 1000);
+      return res.status(423).json({
+        error: 'Account temporarily locked due to repeated failed login attempts.',
+        retryAfter: remainingSec,
+      });
+    }
+
     const passwordMatches = await bcrypt.compare(password, client?.password_hash || DUMMY_HASH);
     if (!client || !passwordMatches) {
+      // Log the failed attempt
       await logLoginAttempt({
         clientId: client?.id ?? null,
         email,
@@ -63,10 +85,31 @@ router.post('/login', [
         success: false,
         userAgent: req.headers['user-agent'],
       });
+
+      // Increment account-level failure count if the email exists
+      if (client) {
+        const newCount = (client.failed_login_count || 0) + 1;
+        const lockoutMinutes = computeLockoutMinutes(newCount);
+        const lockedUntil = lockoutMinutes > 0
+          ? new Date(Date.now() + lockoutMinutes * 60 * 1000)
+          : null;
+
+        await db.query(
+          'UPDATE clients SET failed_login_count = $1, locked_until = $2 WHERE id = $3',
+          [newCount, lockedUntil, client.id]
+        );
+      }
+
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Log successful login
+    // Successful login — reset failure counters
+    await db.query(
+      'UPDATE clients SET failed_login_count = 0, locked_until = NULL WHERE id = $1',
+      [client.id]
+    );
+
+    // Log success
     await logLoginAttempt({
       clientId: client.id,
       email,
@@ -75,7 +118,7 @@ router.post('/login', [
       userAgent: req.headers['user-agent'],
     });
 
-    // Check for new IP (stable signal, unlike UA fingerprinting)
+    // New-device detection
     const newDevice = await isNewIp(client.id, req.ip);
     if (newDevice) {
       await alertNewDevice({
@@ -98,9 +141,8 @@ router.post('/login', [
       { expiresIn: config.jwtExpiresIn }
     );
 
-    // Store active session (for concurrent session limits / kill-switch)
     await db.query(
-      `INSERT INTO client_sessions 
+      `INSERT INTO client_sessions
        (client_id, jti, ip_address, user_agent, expires_at)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (jti) DO NOTHING`,
@@ -141,7 +183,6 @@ router.post('/logout', requireClientAuth, async (req, res) => {
       ? new Date(req.client.exp * 1000)
       : new Date(Date.now() + COOKIE_MAX_AGE_MS);
     await blocklistClientToken(req.client.jti, expiresAt);
-    // Also remove from active sessions
     await db.query('DELETE FROM client_sessions WHERE jti = $1', [req.client.jti]);
   }
   res.clearCookie('clientToken');
