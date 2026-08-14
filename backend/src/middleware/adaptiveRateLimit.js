@@ -1,51 +1,55 @@
-// backend/src/middleware/adaptiveRateLimit.js
-// Rate limits that tighten when abuse is detected.
-// Requires Redis for multi-instance deployments.
+import { rateLimit } from 'express-rate-limit';
+import db from '../db.js';
 
-import rateLimit from 'express-rate-limit';
-import Redis from 'ioredis';
+const VIOLATION_TABLE = 'rate_limit_violations';
+let initialized = false;
 
-const redis = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: Number(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
-  db: Number(process.env.REDIS_DB) || 0,
-});
+async function ensureTables() {
+  if (initialized) return;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ${VIOLATION_TABLE} (
+      ip INET PRIMARY KEY,
+      score INTEGER NOT NULL DEFAULT 1,
+      last_violation TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  initialized = true;
+}
 
-const VIOLATION_KEY_PREFIX = 'ratelimit:violations:';
-const VIOLATION_TTL_SECONDS = 15 * 60; // 15 minutes
-
-/**
- * Records a violation for an IP, increasing its penalty score.
- * Called automatically when rate limit is exceeded.
- */
 export async function recordViolation(ip) {
-  const key = `${VIOLATION_KEY_PREFIX}${ip}`;
+  await ensureTables();
   try {
-    await redis.incr(key);
-    await redis.expire(key, VIOLATION_TTL_SECONDS);
+    await db.query(`
+      INSERT INTO ${VIOLATION_TABLE} (ip, score, last_violation)
+      VALUES ($1, 1, NOW())
+      ON CONFLICT (ip) DO UPDATE SET
+        score = ${VIOLATION_TABLE}.score + 1,
+        last_violation = NOW()
+    `, [ip]);
   } catch (err) {
-    console.error('[adaptiveRateLimit] Redis violation record failed:', err.message);
+    console.error('[adaptiveRateLimit] Violation record failed:', err.message);
   }
 }
 
-/**
- * Gets the current violation score for an IP.
- */
 async function getViolationScore(ip) {
-  const key = `${VIOLATION_KEY_PREFIX}${ip}`;
+  await ensureTables();
   try {
-    const score = await redis.get(key);
-    return parseInt(score || '0', 10);
+    await db.query(`
+      UPDATE ${VIOLATION_TABLE}
+      SET score = 1
+      WHERE ip = $1 AND last_violation < NOW() - INTERVAL '1 hour'
+    `, [ip]);
+
+    const result = await db.query(
+      `SELECT score FROM ${VIOLATION_TABLE} WHERE ip = $1`,
+      [ip]
+    );
+    return result.rows[0]?.score || 0;
   } catch {
     return 0;
   }
 }
 
-/**
- * Computes adaptive max requests based on violation history.
- * Each violation halves the budget, with a floor of 5 req/15min.
- */
 async function getAdaptiveMax(ip, baseMax) {
   const score = await getViolationScore(ip);
   if (score === 0) return baseMax;
@@ -53,75 +57,75 @@ async function getAdaptiveMax(ip, baseMax) {
   return Math.floor(baseMax * multiplier);
 }
 
-// Redis-backed store for express-rate-limit
-class RedisRateLimitStore {
-  constructor() {
-    this.prefix = 'ratelimit:store:';
+class PostgresRateLimitStore {
+  constructor(windowMs = 15 * 60 * 1000) {
+    this.windowMs = windowMs;
+  }
+
+  init(options) {
+    this.windowMs = options.windowMs;
   }
 
   async increment(key) {
-    const fullKey = `${this.prefix}${key}`;
-    const current = await redis.incr(fullKey);
-    await redis.expire(fullKey, 15 * 60); // 15 min window
-    return { totalHits: current, resetTime: new Date(Date.now() + 15 * 60 * 1000) };
+    const result = await db.query(
+      `INSERT INTO rate_limits (key, count, reset_time)
+       VALUES ($1, 1, NOW() + INTERVAL '1 millisecond' * $2)
+       ON CONFLICT (key) DO UPDATE SET
+         count = CASE
+           WHEN rate_limits.reset_time <= NOW() THEN 1
+           ELSE rate_limits.count + 1
+         END,
+         reset_time = CASE
+           WHEN rate_limits.reset_time <= NOW() THEN NOW() + INTERVAL '1 millisecond' * $2
+           ELSE rate_limits.reset_time
+         END
+       RETURNING count, reset_time`,
+      [key, this.windowMs]
+    );
+    const row = result.rows[0];
+    return { totalHits: row.count, resetTime: new Date(row.reset_time) };
   }
 
   async decrement(key) {
-    const fullKey = `${this.prefix}${key}`;
-    await redis.decr(fullKey);
+    await db.query(
+      'UPDATE rate_limits SET count = GREATEST(count - 1, 0) WHERE key = $1',
+      [key]
+    );
   }
 
   async resetKey(key) {
-    const fullKey = `${this.prefix}${key}`;
-    await redis.del(fullKey);
+    await db.query('DELETE FROM rate_limits WHERE key = $1', [key]);
   }
 }
 
-// General API — adaptive, starts at 100 req/15min
 export const adaptiveLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: async (req) => getAdaptiveMax(req.ip, 100),
   standardHeaders: true,
   legacyHeaders: false,
-  store: new RedisRateLimitStore(),
+  store: new PostgresRateLimitStore(),
   keyGenerator: (req) => `api:${req.ip}`,
   handler: async (req, res, next, options) => {
     await recordViolation(req.ip);
     res.status(429).json({
       error: 'Too many requests. Rate limit reduced due to recent activity.',
-      retryAfter: 15 * 60,
+      retryAfter: Math.ceil(options.windowMs / 1000),
     });
   },
 });
 
-// Auth endpoints — strict, non-adaptive (always 5 req/15min)
 export const strictAuthLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: async (req) => getAdaptiveMax(req.ip, 5),
   standardHeaders: true,
   legacyHeaders: false,
-  store: new RedisRateLimitStore(),
+  store: new PostgresRateLimitStore(),
   keyGenerator: (req) => `auth:${req.ip}`,
   handler: async (req, res, next, options) => {
     await recordViolation(req.ip);
     res.status(429).json({
       error: 'Too many login attempts. Account temporarily restricted.',
-      retryAfter: 15 * 60,
+      retryAfter: Math.ceil(options.windowMs / 1000),
     });
-  },
-});
-
-// Contact form — adaptive, starts at 5 req/window
-export const adaptiveContactLimiter = rateLimit({
-  windowMs: (Number(process.env.CONTACT_RATE_LIMIT_WINDOW_MINUTES) || 15) * 60 * 1000,
-  max: async (req) =>
-    getAdaptiveMax(req.ip, Number(process.env.CONTACT_RATE_LIMIT_MAX) || 5),
-  standardHeaders: true,
-  legacyHeaders: false,
-  store: new RedisRateLimitStore(),
-  keyGenerator: (req) => `contact:${req.ip}`,
-  handler: async (req, res, next, options) => {
-    await recordViolation(req.ip);
-    res.status(429).json({ error: 'Too many submissions. Please try again later.' });
   },
 });
