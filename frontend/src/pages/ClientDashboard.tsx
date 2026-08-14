@@ -13,6 +13,12 @@ interface ComplianceItem {
   updated_at: string | null;
 }
 
+interface LoginEvent {
+  ipAddress: string;
+  success: boolean;
+  createdAt: string;
+}
+
 interface ClientInfo {
   id: number;
   company_name: string;
@@ -32,6 +38,8 @@ export default function ClientDashboard() {
   const [client, setClient] = useState<ClientInfo | null>(null);
   const [frameworks, setFrameworks] = useState<Record<string, ComplianceItem[]>>({});
   const [score, setScore] = useState<{ score: number | null; label: string } | null>(null);
+  const [loginEvents, setLoginEvents] = useState<LoginEvent[]>([]);
+  const [failedLoginCount, setFailedLoginCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -56,6 +64,13 @@ export default function ClientDashboard() {
         if (scoreRes.ok) {
           const scoreData = await scoreRes.json();
           setScore({ score: scoreData.score, label: scoreData.label });
+        }
+
+        const securityRes = await fetch(`${API_BASE}/api/client/security-events`, { credentials: 'include' });
+        if (securityRes.ok) {
+          const securityData = await securityRes.json();
+          setLoginEvents(securityData.events || []);
+          setFailedLoginCount(securityData.failedCount || 0);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -159,6 +174,38 @@ export default function ClientDashboard() {
             </div>
           </div>
         ))}
+
+        <div className="mt-10">
+          <h2 className="font-serif text-lg text-alux-cyan mb-4">Account Login Activity</h2>
+          {failedLoginCount > 0 && (
+            <div className="bg-alux-red/10 border border-alux-red/30 rounded-xl p-4 mb-4">
+              <p className="text-alux-red text-sm font-medium">
+                {failedLoginCount} failed login {failedLoginCount === 1 ? 'attempt' : 'attempts'} on your account recently.
+              </p>
+              <p className="text-white/50 text-xs mt-1">
+                If this wasn't you, consider changing your password and contacting Alux Plaza.
+              </p>
+            </div>
+          )}
+          <div className="space-y-2">
+            {loginEvents.length === 0 && (
+              <p className="text-white/40 text-sm">No login activity recorded yet.</p>
+            )}
+            {loginEvents.map((event, idx) => (
+              <div
+                key={idx}
+                className="bg-navy-surface border border-white/10 rounded-lg px-4 py-3 flex items-center justify-between text-sm"
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`w-2 h-2 rounded-full ${event.success ? 'bg-alux-green' : 'bg-alux-red'}`} />
+                  <span className="text-white/80">{event.success ? 'Successful login' : 'Failed login attempt'}</span>
+                  <span className="text-white/30 font-mono text-xs">{event.ipAddress}</span>
+                </div>
+                <span className="text-white/40 text-xs">{new Date(event.createdAt).toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </main>
     </div>
   );
