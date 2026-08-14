@@ -27,6 +27,24 @@ function parseExpiryToMs(value, fallbackMs) {
 
 const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 8 * 60 * 60 * 1000);
 
+// Logs every login attempt (success or failure) for client-facing
+// visibility — separate from Shield's threshold-triggered brute-force
+// blocking. clientId is null when the email doesn't match any real
+// account (still worth recording, just has no client to show it to).
+// Never let a logging failure break the actual login flow, so this
+// always fails silently rather than throwing.
+async function logLoginAttempt({ clientId, email, ip, success }) {
+  try {
+    await db.query(
+      `INSERT INTO client_login_attempts (client_id, email_attempted, ip_address, success)
+       VALUES ($1, $2, $3, $4)`,
+      [clientId, email, ip, success]
+    );
+  } catch (err) {
+    console.error('[clientAuth] Failed to log login attempt:', err.message);
+  }
+}
+
 /**
  * POST /api/client/login
  */
@@ -47,8 +65,11 @@ router.post('/login', [
 
     const passwordMatches = await bcrypt.compare(password, client?.password_hash || DUMMY_HASH);
     if (!client || !passwordMatches) {
+      await logLoginAttempt({ clientId: client?.id ?? null, email, ip: req.ip, success: false });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+
+    await logLoginAttempt({ clientId: client.id, email, ip: req.ip, success: true });
 
     const jti = crypto.randomUUID();
     const token = jwt.sign(
