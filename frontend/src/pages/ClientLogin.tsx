@@ -1,104 +1,102 @@
-import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
-import { API_BASE } from '@/lib/api';
+// frontend/src/pages/ClientLogin.tsx — SECURE VERSION
+// Uses secureFetch (CSRF auto-attached) + honeypot field.
+// Does NOT use broken client-side request signing.
+
+import { useState } from 'react';
+import { secureFetch, isHoneypotTriggered } from '@/lib/security';
+import { SecurityHoneypot } from '@/components/SecurityHoneypot';
 
 export default function ClientLogin() {
-  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    setSubmitting(true);
+    setLoading(true);
+
+    // Honeypot check: if filled, it's a bot
+    if (isHoneypotTriggered()) {
+      setError('Security check failed.');
+      setLoading(false);
+      return;
+    }
 
     try {
-      const res = await fetch(`${API_BASE}/api/client/login`, {
+      const res = await secureFetch('/api/client/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // credentials: 'include' is required here (unlike the public contact
-        // form fetch) because the frontend and backend run on different
-        // origins — without this, the browser won't send or store the
-        // httpOnly session cookie the backend sets on successful login.
-        credentials: 'include',
         body: JSON.stringify({ email, password }),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Server error: ${res.status}`);
+        throw new Error(data.error || 'Login failed');
       }
 
-      navigate('/client/dashboard');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed.');
+      const data = await res.json();
+      if (data.newDeviceAlert) {
+        // Show a banner: "New device detected, email sent"
+        console.warn('New device login detected — check your email');
+      }
+
+      window.location.href = '/dashboard';
+    } catch (err: any) {
+      setError(err.message || 'Invalid credentials');
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-navy-base text-white flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-navy-surface border border-alux-gold/20 rounded-2xl p-8 shadow-xl">
-        <h1 className="font-serif text-2xl text-alux-gold mb-1">Client Portal</h1>
-        <p className="text-sm text-white/60 mb-8">
-          Sign in to view your compliance status.
-        </p>
+    <div className="min-h-screen flex items-center justify-center bg-navy-dark">
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-md p-8 bg-navy rounded-xl border border-white/10 relative"
+      >
+        <SecurityHoneypot />
+        <h2 className="text-2xl font-bold text-white mb-6">Client Portal</h2>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div>
-            <label htmlFor="client-email" className="block text-sm text-white/70 mb-1.5">
-              Email
-            </label>
-            <input
-              id="client-email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-navy-light border border-white/10 rounded-lg px-3.5 py-2.5 text-white
-                         focus:outline-none focus:border-alux-cyan/60 focus:ring-1 focus:ring-alux-cyan/40"
-              placeholder="you@company.com"
-            />
+        {error && (
+          <div className="mb-4 p-3 rounded bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+            {error}
           </div>
+        )}
 
-          <div>
-            <label htmlFor="client-password" className="block text-sm text-white/70 mb-1.5">
-              Password
-            </label>
-            <input
-              id="client-password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-navy-light border border-white/10 rounded-lg px-3.5 py-2.5 text-white
-                         focus:outline-none focus:border-alux-cyan/60 focus:ring-1 focus:ring-alux-cyan/40"
-              placeholder="••••••••"
-            />
-          </div>
+        <div className="mb-4">
+          <label className="block text-sm text-white/70 mb-1">Email</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full bg-navy-light border border-white/10 rounded-lg px-3.5 py-2.5 text-white"
+            placeholder="you@company.com"
+            required
+          />
+        </div>
 
-          {error && (
-            <p className="text-alux-red text-sm">{error}</p>
-          )}
+        <div className="mb-6">
+          <label className="block text-sm text-white/70 mb-1">Password</label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full bg-navy-light border border-white/10 rounded-lg px-3.5 py-2.5 text-white"
+            placeholder="••••••••"
+            required
+          />
+        </div>
 
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full bg-alux-gold hover:bg-alux-gold-light disabled:opacity-50
-                       text-navy-base font-semibold rounded-lg py-2.5 transition-colors"
-          >
-            {submitting ? 'Signing in…' : 'Sign In'}
-          </button>
-        </form>
-
-        <p className="text-xs text-white/40 mt-6 text-center">
-          Credentials for this portal are issued directly by Alux Plaza after
-          an engagement begins. Contact us if you haven't received yours.
-        </p>
-      </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-alux-cyan text-navy-dark font-semibold py-2.5 rounded-lg hover:bg-alux-cyan/90 disabled:opacity-50"
+        >
+          {loading ? 'Signing in...' : 'Sign In'}
+        </button>
+      </form>
     </div>
   );
 }
