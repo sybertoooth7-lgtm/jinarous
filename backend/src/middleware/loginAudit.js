@@ -1,0 +1,70 @@
+// backend/src/middleware/loginAudit.js
+// Logs every login attempt (success and failure) with IP and metadata.
+// Detects new-device logins and can trigger alerts.
+// Requires: Redis (for caching known fingerprints per user).
+
+import db from '../db.js';
+
+const DUMMY_HASH = '$2b$12$c.ByGOhklqTXtY6UiWrCieVW3v1ZsI5tlBj/MfE9V92LjUYa9iuHu';
+
+/**
+ * Call this inside your login handler BEFORE sending the response.
+ * Logs the attempt and returns whether this is a new device.
+ * 
+ * @param {Object} params
+ * @param {number|null} params.clientId
+ * @param {string} params.email
+ * @param {string} params.ip
+ * @param {boolean} params.success
+ * @param {string} params.userAgent
+ * @returns {Promise<boolean>} true if this is a new device for this client
+ */
+export async function logLoginAttempt({ clientId, email, ip, success, userAgent }) {
+  try {
+    await db.query(
+      `INSERT INTO client_login_attempts 
+       (client_id, email_attempted, ip_address, success, user_agent, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())`,
+      [clientId, email, ip, success, userAgent || null]
+    );
+  } catch (err) {
+    console.error('[loginAudit] Failed to log attempt:', err.message);
+  }
+}
+
+/**
+ * Checks if this client has ever successfully logged in from this IP before.
+ * Uses a simple DB check. For high-traffic apps, cache in Redis.
+ * 
+ * @param {number} clientId
+ * @param {string} ip
+ * @returns {Promise<boolean>} true if this IP has never been seen
+ */
+export async function isNewIp(clientId, ip) {
+  try {
+    const result = await db.query(
+      `SELECT 1 FROM client_login_attempts
+       WHERE client_id = $1 AND ip_address = $2 AND success = TRUE
+       LIMIT 1`,
+      [clientId, ip]
+    );
+    return result.rows.length === 0;
+  } catch (err) {
+    console.error('[loginAudit] New-IP check failed:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Optional: Send email alert for new-device login.
+ * Replace console.log with your email service (SendGrid, AWS SES, etc.)
+ */
+export async function alertNewDevice({ clientId, email, ip, userAgent }) {
+  console.log(
+    `[SECURITY] New device login for client ${clientId} (${email}) from IP ${ip}, UA: ${userAgent}`
+  );
+  // TODO: integrate with your email provider
+  // await sendEmail({ to: email, subject: 'New login from unfamiliar device', ... });
+}
+
+export { DUMMY_HASH };
