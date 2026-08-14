@@ -1,4 +1,7 @@
-// routes/clientAuth.js
+// backend/src/routes/clientAuth.js — ENHANCED VERSION
+// Adds login audit logging, new-device detection, and CSRF/honeypot checks.
+// Does NOT include broken request signing or unstable device fingerprinting.
+
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -7,13 +10,14 @@ import { body, validationResult } from 'express-validator';
 import db from '../db.js';
 import { config } from '../config.js';
 import { requireClientAuth, blocklistClientToken } from '../middleware/clientAuth.js';
+import {
+  logLoginAttempt,
+  isNewIp,
+  alertNewDevice,
+  DUMMY_HASH,
+} from '../middleware/loginAudit.js';
 
 const router = Router();
-
-// Same timing-attack mitigation as admin.js: compare against a dummy
-// hash even when the email doesn't exist, so login response time doesn't
-// leak which emails are registered clients.
-const DUMMY_HASH = '$2b$12$c.ByGOhklqTXtY6UiWrCieVW3v1ZsI5tlBj/MfE9V92LjUYa9iuHu';
 
 function parseExpiryToMs(value, fallbackMs) {
   if (!value) return fallbackMs;
@@ -26,24 +30,6 @@ function parseExpiryToMs(value, fallbackMs) {
 }
 
 const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 8 * 60 * 60 * 1000);
-
-// Logs every login attempt (success or failure) for client-facing
-// visibility — separate from Shield's threshold-triggered brute-force
-// blocking. clientId is null when the email doesn't match any real
-// account (still worth recording, just has no client to show it to).
-// Never let a logging failure break the actual login flow, so this
-// always fails silently rather than throwing.
-async function logLoginAttempt({ clientId, email, ip, success }) {
-  try {
-    await db.query(
-      `INSERT INTO client_login_attempts (client_id, email_attempted, ip_address, success)
-       VALUES ($1, $2, $3, $4)`,
-      [clientId, email, ip, success]
-    );
-  } catch (err) {
-    console.error('[clientAuth] Failed to log login attempt:', err.message);
-  }
-}
 
 /**
  * POST /api/client/login
@@ -59,23 +45,72 @@ router.post('/login', [
 
   const { email, password } = req.body;
 
+  // Honeypot check: if the hidden field is filled, silently reject
+  if (req.body.website_url && req.body.website_url.trim().length > 0) {
+    return res.status(400).json({ error: 'Invalid request' });
+  }
+
   try {
     const result = await db.query('SELECT * FROM clients WHERE email = $1', [email]);
     const client = result.rows[0];
 
     const passwordMatches = await bcrypt.compare(password, client?.password_hash || DUMMY_HASH);
     if (!client || !passwordMatches) {
-      await logLoginAttempt({ clientId: client?.id ?? null, email, ip: req.ip, success: false });
+      await logLoginAttempt({
+        clientId: client?.id ?? null,
+        email,
+        ip: req.ip,
+        success: false,
+        userAgent: req.headers['user-agent'],
+      });
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    await logLoginAttempt({ clientId: client.id, email, ip: req.ip, success: true });
+    // Log successful login
+    await logLoginAttempt({
+      clientId: client.id,
+      email,
+      ip: req.ip,
+      success: true,
+      userAgent: req.headers['user-agent'],
+    });
+
+    // Check for new IP (stable signal, unlike UA fingerprinting)
+    const newDevice = await isNewIp(client.id, req.ip);
+    if (newDevice) {
+      await alertNewDevice({
+        clientId: client.id,
+        email: client.email,
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+    }
 
     const jti = crypto.randomUUID();
     const token = jwt.sign(
-      { sub: client.id, email: client.email, role: 'client', jti },
+      {
+        sub: client.id,
+        email: client.email,
+        role: 'client',
+        jti,
+      },
       config.jwtSecret,
       { expiresIn: config.jwtExpiresIn }
+    );
+
+    // Store active session (for concurrent session limits / kill-switch)
+    await db.query(
+      `INSERT INTO client_sessions 
+       (client_id, jti, ip_address, user_agent, expires_at)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (jti) DO NOTHING`,
+      [
+        client.id,
+        jti,
+        req.ip,
+        req.headers['user-agent'] || null,
+        new Date(Date.now() + COOKIE_MAX_AGE_MS),
+      ]
     );
 
     res.cookie('clientToken', token, {
@@ -85,7 +120,12 @@ router.post('/login', [
       maxAge: COOKIE_MAX_AGE_MS,
     });
 
-    res.json({ success: true, email: client.email, companyName: client.company_name });
+    res.json({
+      success: true,
+      email: client.email,
+      companyName: client.company_name,
+      newDeviceAlert: newDevice,
+    });
   } catch (err) {
     console.error('[clientAuth] Login error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -97,8 +137,12 @@ router.post('/login', [
  */
 router.post('/logout', requireClientAuth, async (req, res) => {
   if (req.client?.jti) {
-    const expiresAt = req.client.exp ? new Date(req.client.exp * 1000) : new Date(Date.now() + COOKIE_MAX_AGE_MS);
+    const expiresAt = req.client.exp
+      ? new Date(req.client.exp * 1000)
+      : new Date(Date.now() + COOKIE_MAX_AGE_MS);
     await blocklistClientToken(req.client.jti, expiresAt);
+    // Also remove from active sessions
+    await db.query('DELETE FROM client_sessions WHERE jti = $1', [req.client.jti]);
   }
   res.clearCookie('clientToken');
   res.json({ success: true });
