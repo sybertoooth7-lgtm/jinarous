@@ -25,6 +25,7 @@ import { requireClientAuth } from './middleware/clientAuth.js';
 import clientRiskScoreRoutes from './routes/clientRiskScore.js';
 import adminRiskScoreRoutes from './routes/adminRiskScore.js';
 import verifyScoreRoutes from './routes/verifyScore.js';
+import clientSecurityEventsRoutes from './routes/clientSecurityEvents.js';
 
 async function startServer() {
   const app = express();
@@ -123,6 +124,7 @@ async function startServer() {
   app.use('/api/admin/clients/:id/risk-score-shares', requireAuth, adminRiskScoreRoutes);
   app.use('/api/client/risk-score', requireClientAuth, clientRiskScoreRoutes);
   app.use('/api/verify', verifyScoreRoutes);
+  app.use('/api/client/security-events', requireClientAuth, clientSecurityEventsRoutes);
 
   // Catch malformed request bodies as a plain 400 — not a 500, and not
   // reported to error tracking. A client sending broken JSON isn't a
