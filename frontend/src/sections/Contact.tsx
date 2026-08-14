@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
 import { API_BASE } from '@/lib/api';
+import { secureFetch } from '../lib/secureFetch';
+
+// Replace:
+// const res = await fetch('/api/contact', { method: 'POST', ... })
+
+// With:
+const res = await secureFetch('/api/contact', { method: 'POST', ... });
 
 const MAX_MESSAGE = 5000;
 const MAX_COMPANY = 150;
