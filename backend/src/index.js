@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import cluster from 'cluster';
 import os from 'os';
@@ -13,8 +14,7 @@ import contactRoutes from './routes/contact.js';
 import adminRoutes from './routes/admin.js';
 import statusRoutes from './routes/status.js';
 import toolsRoutes from './routes/tools.js';
-import { limiter, authLimiter, contactLimiter } from './middleware/rate-limit.js';
-import { adaptiveLimiter, strictAuthLimiter } from './middleware/adaptiveRateLimit.js';
+import { limiter, authLimiter } from './middleware/rate-limit.js';
 import { shield } from './middleware/shieldMiddleware.js';
 import { requireAuth } from './middleware/auth.js';
 import adminSecurityRoutes from './routes/adminSecurity.js';
@@ -27,19 +27,26 @@ import adminRiskScoreRoutes from './routes/adminRiskScore.js';
 import verifyScoreRoutes from './routes/verifyScore.js';
 import clientSecurityEventsRoutes from './routes/clientSecurityEvents.js';
 import { setCsrfCookie, verifyCsrfToken } from './middleware/csrf.js';
-import { attachCspNonce, helmetMiddleware } from './middleware/helmetConfig.js';
 
 async function startServer() {
   const app = express();
 
   app.set('trust proxy', 1);
 
-  // 1. Helmet + nonce-based CSP
-  app.use(attachCspNonce);
-  app.use(helmetMiddleware);
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:'],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+  }));
 
-  // 2. CORS
-  const allowedOrigins = config.corsOrigins?.length > 0
+  const allowedOrigins = config.corsOrigins.length > 0
     ? config.corsOrigins
     : ['http://localhost:3000'];
 
@@ -48,19 +55,11 @@ async function startServer() {
     credentials: true,
   }));
 
-  // 3. Cookie parser (before CSRF)
   app.use(cookieParser());
-
-  // 4. CSRF cookie
   app.use(setCsrfCookie);
-
-  // 5. Body parsing
   app.use(express.json({ limit: '1mb' }));
-
-  // 6. Shield
   app.use(shield);
 
-  // 7. Metrics
   app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
@@ -78,10 +77,8 @@ async function startServer() {
     },
   }));
 
-  // 8. CSRF verification
   app.use(verifyCsrfToken);
 
-  // Health
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
   });
@@ -95,13 +92,10 @@ async function startServer() {
     }
   });
 
-  // Rate limits
-  app.use('/api', adaptiveLimiter);
-  app.use('/api/admin/login', strictAuthLimiter);
-  app.use('/api/client/login', strictAuthLimiter);
-  app.use('/api/contact', contactLimiter);
+  app.use('/api', limiter);
+  app.use('/api/admin/login', authLimiter);
+  app.use('/api/client/login', authLimiter);
 
-  // Routes
   app.use('/api/contact', contactRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/status', statusRoutes);
@@ -111,16 +105,11 @@ async function startServer() {
   app.use('/api/client/compliance', requireClientAuth, complianceRoutes);
   app.use('/api/admin/clients', requireAuth, adminClientsRoutes);
   app.use('/admin', express.static('public/admin'));
-
-  // NOTE: adminRiskScoreRoutes must be an Express Router with { mergeParams: true }
-  // to access req.params.id defined in this mount path.
   app.use('/api/admin/clients/:id/risk-score-shares', requireAuth, adminRiskScoreRoutes);
-
   app.use('/api/client/risk-score', requireClientAuth, clientRiskScoreRoutes);
   app.use('/api/verify', verifyScoreRoutes);
   app.use('/api/client/security-events', requireClientAuth, clientSecurityEventsRoutes);
 
-  // Error handler
   app.use((err, req, res, next) => {
     if (err.type === 'entity.parse.failed') {
       return res.status(400).json({ error: 'Malformed request body' });
@@ -140,19 +129,9 @@ async function startServer() {
 
   const statsInterval = setInterval(persistStats, 10_000);
 
-  // Cleanup expired client sessions every 10 minutes
-  const sessionCleanupInterval = setInterval(async () => {
-    try {
-      await db.query('DELETE FROM client_sessions WHERE expires_at < NOW()');
-    } catch (err) {
-      logger.error({ err }, 'Session cleanup failed');
-    }
-  }, 10 * 60 * 1000);
-
   async function shutdown(signal) {
     logger.info(`${signal} received, shutting down gracefully`);
     clearInterval(statsInterval);
-    clearInterval(sessionCleanupInterval);
     await persistStats();
     server.close(async () => {
       await db.end().catch(() => {});
