@@ -61,7 +61,7 @@ async function bootServerAndCaptureLogs(env, port) {
 describe('boot-time admin-user warning', () => {
   it('warns when no admin users exist yet on a fresh database', async () => {
     const output = await bootServerAndCaptureLogs(
-      { NODE_ENV: 'development', JWT_SECRET: 'a-sufficiently-long-random-test-secret-value-here' },
+      { NODE_ENV: 'development', JWT_SECRET: 'kQ7mZx2Rp9LtVb4WnJf8CyU3HdEa6Ns1Mg5X' },
       5011
     );
     expect(output).toMatch(/No admin users exist yet/);
