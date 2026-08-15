@@ -2,12 +2,6 @@ import React, { useState } from 'react';
 import { API_BASE } from '@/lib/api';
 import { secureFetch } from '../lib/secureFetch';
 
-// Replace:
-// const res = await fetch('/api/contact', { method: 'POST', ... })
-
-// With:
-const res = await secureFetch('/api/contact', { method: 'POST', ... });
-
 const MAX_MESSAGE = 5000;
 const MAX_COMPANY = 150;
 const MAX_NAME = 100;
@@ -47,7 +41,10 @@ export default function Contact() {
     setErrorMsg('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/contact`, {
+      // secureFetch attaches the CSRF header and sends credentials —
+      // a plain fetch() here would fail with "CSRF token missing" and,
+      // on a cross-origin deployment, wouldn't send/receive cookies at all.
+      const res = await secureFetch(`${API_BASE}/api/contact`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
@@ -60,9 +57,9 @@ export default function Contact() {
 
       setStatus('success');
       setForm({ name: '', email: '', company: '', message: '' });
-    } catch (err: any) {
+    } catch (err: unknown) {
       setStatus('error');
-      setErrorMsg(err.message || 'Failed to send message. Please try again.');
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to send message. Please try again.');
     }
   };
 
