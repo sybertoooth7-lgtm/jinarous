@@ -43,7 +43,7 @@ describe('config.js fail-fast validation', () => {
   it('exits non-zero in production with JWT_SECRET set but CORS_ORIGIN missing (the original footgun)', () => {
     const { code, output } = runNodeWithEnv({
       NODE_ENV: 'production',
-      JWT_SECRET: 'a-sufficiently-long-random-test-secret-value-here',
+      JWT_SECRET: 'kQ7mZx2Rp9LtVb4WnJf8CyU3HdEa6Ns1Mg5X',
       CORS_ORIGIN: '',
     });
     expect(code).not.toBe(0);
@@ -53,7 +53,7 @@ describe('config.js fail-fast validation', () => {
   it('starts successfully in production with both JWT_SECRET and CORS_ORIGIN set', () => {
     const { code, output } = runNodeWithEnv({
       NODE_ENV: 'production',
-      JWT_SECRET: 'a-sufficiently-long-random-test-secret-value-here',
+      JWT_SECRET: 'kQ7mZx2Rp9LtVb4WnJf8CyU3HdEa6Ns1Mg5X',
       CORS_ORIGIN: 'https://example.com',
     });
     expect(code).toBe(0);
@@ -63,7 +63,7 @@ describe('config.js fail-fast validation', () => {
   it('does not require CORS_ORIGIN outside of production (local dev stays convenient)', () => {
     const { code, output } = runNodeWithEnv({
       NODE_ENV: 'development',
-      JWT_SECRET: 'a-sufficiently-long-random-test-secret-value-here',
+      JWT_SECRET: 'kQ7mZx2Rp9LtVb4WnJf8CyU3HdEa6Ns1Mg5X',
       CORS_ORIGIN: '',
     });
     expect(code).toBe(0);
@@ -73,7 +73,7 @@ describe('config.js fail-fast validation', () => {
   it('rejects a CORS_ORIGIN missing the http(s):// scheme (a common real deployment mistake)', () => {
     const { code, output } = runNodeWithEnv({
       NODE_ENV: 'production',
-      JWT_SECRET: 'a-sufficiently-long-random-test-secret-value-here',
+      JWT_SECRET: 'kQ7mZx2Rp9LtVb4WnJf8CyU3HdEa6Ns1Mg5X',
       CORS_ORIGIN: 'aluxplaza.com', // missing scheme - would never match a real Origin header
     });
     expect(code).not.toBe(0);
@@ -89,7 +89,7 @@ describe('config.js fail-fast validation', () => {
         env: {
           ...process.env,
           NODE_ENV: 'production',
-          JWT_SECRET: 'a-sufficiently-long-random-test-secret-value-here',
+          JWT_SECRET: 'kQ7mZx2Rp9LtVb4WnJf8CyU3HdEa6Ns1Mg5X',
           CORS_ORIGIN: 'https://aluxplaza.com/',
         },
         encoding: 'utf8',
