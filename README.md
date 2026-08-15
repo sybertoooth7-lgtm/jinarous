@@ -1,217 +1,147 @@
-EVERYTHING FIXED — full instructions
-======================================
+# Sandbox-verified fixes — complete apply list
 
-This was a big pass. Do these in order: DELETE first, then RENAME, then
-REPLACE/CREATE the code files, in the order listed (migrations before
-code, since the code assumes the new columns exist).
+Everything here was reproduced, fixed, and re-verified in a clean
+sandbox: fresh Postgres + all 15 migrations, full backend test suite
+(31/31 passing), live server + real auth/CSRF/CORS round trips
+(including cross-origin, matching your Vercel+Railway split), frontend
+typecheck + build, and a contact-form submission traced end-to-end into
+Postgres. Re-verified again after the deletions below — still 15/15,
+31/31, clean build.
 
------------------------------------------------------------------------
-STEP 1 — DELETE these (confirmed dead/orphaned, safe to remove)
------------------------------------------------------------------------
-  backend/migrations/004 add contact details and status · SQL
-    (the malformed-filename version — replaced by the properly-named
-    004_add_contact_details_and_status.sql below)
+## DELETE these (confirmed dead, safe to remove)
 
-  backend/migrations/005_add_indexes.sql
-    (renamed to 009_add_contact_indexes.sql below — there were two
-    different files both numbered 005)
+- `backend/migrations/012_security_enhancements.sql` — replaced by
+  `016_security_enhancements.sql` below (see why in section 1)
+- `backend/public/admin/admin.js`
+- `backend/public/admin/admin.css`
+  — dead duplicates; `index.html` actually loads `dashboard.js` /
+  `styles.css`, not these
+- `migrations/004_add_contact_details_and_status.sql`
+- `migrations/005_add_audit_logs_index.sql`
+  — the whole root-level `migrations/` folder. It's separate from
+  `backend/migrations/`, which is the only one your migration runner
+  reads. These two files have never actually run.
+- `DEPLOYMENT (1).md`
+- `ISSUES_FIXED (1).md`
+- `DOCKER_CI_README.md`
+- `PACKAGE_INSTALL.md`
+  — all four describe an earlier, Redis-based rate-limiting design
+  that's since been replaced by the Postgres-backed store already in
+  `backend/src/lib/rate-limit-store.js`. Verified: current code has no
+  Redis dependency anywhere. These docs are stale, not just outdated —
+  keeping them risks someone (including a future AI assistant) reading
+  them as current instructions.
 
-  backend/migrations/008_add_tool_runs.sql
-    (a no-op — 003 already created tool_runs, and 008 used CREATE TABLE
-    IF NOT EXISTS so its intended changes never applied. Replaced by
-    010_alter_tool_runs_columns.sql below, which actually works.)
+## RENAME (browser-upload artifacts — same content, just fix the filename)
 
-  backend/public/admin/admin.js
-  backend/public/admin/admin.css
-    (dead duplicates — index.html actually loads dashboard.js/styles.css)
+- `frontend/Dockerfile (1)` → `frontend/Dockerfile` **but use the
+  version below**, which also fixes a real bug (see section 3)
+- `frontend/dockerignore (1)` → `frontend/.dockerignore` (needs the
+  leading dot to actually work — Docker won't recognize it otherwise).
+  Content unchanged, just the filename.
 
-  backend/src/scripts/create-admin.js
-    (duplicate of backend/scripts/create-admin.js — that one is what
-    npm run create-admin actually runs; this copy was unused. Note
-    there are TWO different directories: backend/scripts/ (keep) and
-    backend/src/scripts/ (delete).)
+## NEW FILE: `backend/migrations/016_security_enhancements.sql`
 
-  migrations/  (the WHOLE folder, at repo ROOT — not backend/migrations)
-    Two files were sitting here that never ran: the migration runner
-    only reads backend/migrations/. Delete this entire root-level folder.
+Content provided in this package. This migration does `ALTER TABLE
+client_login_attempts`, but that table isn't created until
+`014_create_client_login_attempts.sql`. Migrations run in
+filename-sort order, so on a fresh database (new dev machine, CI,
+disaster recovery) the old `012_...` name ran before `014` and failed
+outright. Your production DB only worked because the table already
+existed from an earlier manual run. Renaming to `016` makes it run
+after its dependency. Verified: all 15 migrations now apply cleanly
+from an empty database, both before and after all other changes below.
 
------------------------------------------------------------------------
-STEP 2 — RENAME these (browser-upload artifacts, no functional change)
------------------------------------------------------------------------
-  DEPLOYMENT (1).md          -> DEPLOYMENT.md
-  ISSUES_FIXED (1).md        -> ISSUES_FIXED.md
-  frontend/Dockerfile (1)    -> frontend/Dockerfile
-  frontend/dockerignore (1)  -> frontend/.dockerignore
+## `backend/src/index.js` — one-line change
 
-  In GitHub's web editor: open the file, click the pencil, click the
-  filename field at the top, retype it, commit. No content changes needed
-  for these four.
+Add `import 'dotenv/config';` as the very first line, above your
+existing first import. Rest of the file unchanged (full file included
+in this package for convenience).
 
------------------------------------------------------------------------
-STEP 3 — CREATE these NEW files
------------------------------------------------------------------------
-  outputs/backend/migrations/004_add_contact_details_and_status.sql
-    -> backend/migrations/004_add_contact_details_and_status.sql
-    Corrected version of the malformed one deleted in step 1. Adds
-    company, status, updated_at to contacts; status constrained to
-    new/read/replied/archived (matches what dashboard.js actually offers).
+Why: only `migrate.js` was loading `.env`; the server itself never
+was. Your own README's documented setup flow (`cp .env.example .env` →
+`npm start`) silently didn't work locally — it only worked in
+production because Railway injects env vars directly.
 
-  outputs/backend/migrations/009_add_contact_indexes.sql
-    -> backend/migrations/009_add_contact_indexes.sql
-    (renamed from the old 005_add_indexes.sql, content unchanged)
+## `backend/Dockerfile` — one-line change
 
-  outputs/backend/migrations/010_alter_tool_runs_columns.sql
-    -> backend/migrations/010_alter_tool_runs_columns.sql
-    Does with ALTER TABLE what the deleted 008 tried and failed to do
-    with CREATE TABLE IF NOT EXISTS.
+The built-in `HEALTHCHECK` hits `http://localhost:3001/health`, but
+the real route is `/api/health`. Docker will eventually mark a
+perfectly healthy container as unhealthy and restart it. Full
+corrected file included.
 
------------------------------------------------------------------------
-STEP 4 — REPLACE these existing files (full content swap)
------------------------------------------------------------------------
-  outputs/backend/src/index.js                  -> backend/src/index.js
-  outputs/backend/src/stats.js                  -> backend/src/stats.js
-  outputs/backend/src/middleware/auth.js        -> backend/src/middleware/auth.js
-  outputs/backend/src/middleware/rate-limit.js  -> backend/src/middleware/rate-limit.js
-  outputs/backend/src/lib/rate-limit-store.js   -> backend/src/lib/rate-limit-store.js
-  outputs/backend/src/routes/admin.js           -> backend/src/routes/admin.js
-  outputs/backend/src/routes/contact.js         -> backend/src/routes/contact.js
-  outputs/backend/src/routes/tools.js           -> backend/src/routes/tools.js
-  outputs/frontend/src/sections/Contact.tsx     -> frontend/src/sections/Contact.tsx
+## `frontend/Dockerfile` (replaces the mangled `Dockerfile (1)`)
 
-=========================================================================
-WHY EACH ONE WAS BROKEN
-=========================================================================
+Same content as before, just correctly named. Included in this
+package. Note: `docker-compose.yml` looks for exactly `Dockerfile` —
+with the old mangled name, **the frontend Docker build could not find
+the file at all**. This was a full build breakage, not cosmetic.
 
-THE BIG ONE — nothing ran at all
----------------------------------
-7 files (index.js, stats.js, routes/admin.js, routes/contact.js,
-routes/tools.js, middleware/auth.js, middleware/rate-limit.js) had been
-rewritten using require()/module.exports (CommonJS), but
-backend/package.json has "type": "module", which means Node treats every
-.js file as an ES module. I proved this by actually trying to boot it:
+## `frontend/.dockerignore` (replaces the mangled `dockerignore (1)`)
 
-  BOOT FAIL: require is not defined in ES module scope
+Included in this package — same content, correct filename (leading dot
+required).
 
-The whole backend was down. All 7 are now proper ESM (import/export).
+## `backend/src/scripts/create-admin.js` — full file replacement
 
-The malformed migration filename
----------------------------------
-"004 add contact details and status · SQL" — no .sql extension (ends in
-"· SQL" with a middle-dot character, not a real extension). The migration
-runner filters strictly on files ending in .sql, so this one was silently
-skipped forever. Its content was correct, just unreachable. Renamed and
-recreated properly.
+Included. Fixes a Node.js `readline` ordering quirk with piped stdin.
+Doesn't affect your normal interactive usage (`npm run create-admin`
+in a real terminal — verified that still works correctly end-to-end,
+including a real login afterward) but makes the script robust if you
+ever automate admin creation later.
 
-Table name mismatch
----------------------
-routes/admin.js queried `SELECT * FROM admins`, but the only table ever
-created (migrations/001_init.sql) is `admin_users`. Every login attempt
-would have failed with a Postgres error, not even a clean 401. Fixed.
+## `backend/test/setup.js`, `backend/test/config.test.js`,
+   `backend/test/boot-admin-warning.test.js` — full file replacements
 
-UUID validation on integer IDs
----------------------------------
-The PATCH/DELETE submission routes validated `:id` with .isUUID(), but
-contacts.id is a SERIAL integer, not a UUID (nothing anywhere ever
-changed that). Every real request like PATCH /submissions/1/status would
-have been rejected by validation before it even reached the database.
-Changed to .isInt().
+Included. These hardcoded a `JWT_SECRET` value containing the words
+"secret" and "test" — both on your own app's weak-secret denylist in
+`config.js`. Your validator was correctly rejecting them, so these
+tests were failing (or in `setup.js`'s case, crashing the whole test
+worker) in CI too, not just locally. Swapped in a clean random value.
+Verified: 7/7 test files, 31/31 tests passing.
 
-Wrong package
----------------
-routes/admin.js did `require('bcrypt')` (the native-binding package),
-but package.json only has bcryptjs installed. This alone would have
-crashed the route on load even if the CommonJS issue were fixed. Now
-uses bcryptjs, matching what's actually installed.
+## `frontend/src/sections/Contact.tsx` — full file replacement
 
-Double-escaping (from the earlier security-audit review)
-------------------------------------------------------------
-contact.js called .escape() on name/company/message before storing them.
-But dashboard.js already HTML-escapes every field at render time. Escaping
-twice doesn't add security — express-validator's parameterized queries
-already prevent SQL injection, and dashboard.js's render-time escaping
-already prevents XSS. It just permanently corrupts the data: I proved
-this with a real example — "AT&T" submitted, stored as "AT&amp;T",
-displayed as "AT&amp;amp;T". Verified the fix with real special characters
-end-to-end: "OBrien & Sons" and 'AT&T "Ventures"' now store and return
-exactly as submitted.
+Included. Two separate bugs:
+- Leftover instructional comment text left in as literal top-level
+  code (an `await` outside any function, plus a literal `...`), which
+  failed `tsc` outright — the whole frontend wouldn't build.
+- The real form submission used a raw `fetch()` instead of your
+  `secureFetch()` helper, so it never sent the CSRF header or
+  credentials. This would fail on every real submission once deployed
+  cross-origin (Vercel + Railway) with "CSRF token missing." Verified
+  fixed with a live cross-origin CORS+CSRF round trip that landed a
+  real row in the `contacts` table.
 
-Token blocklist that couldn't actually block anything
------------------------------------------------------------
-routes/admin.js exported an in-memory `tokenBlocklist` Set, and
-middleware/auth.js required it back — a circular require, on top of
-everything else. Even if that worked, an in-memory Set doesn't survive a
-restart, and under CLUSTER_MODE each worker has its own copy — logging
-out via the worker that handles your request wouldn't block the token on
-any other worker. Rewired to use the token_blocklist Postgres table
-(migration 005 already created it, just wasn't being used) — shared
-across every worker and survives restarts. Verified live: logged in, hit
-/me successfully, logged out, hit /me again with the same cookie — 401.
+## `frontend/src/pages/ClientDashboard.tsx` — full file replacement
 
-CORS_ORIGIN silently ignored
--------------------------------
-index.js read `config.corsOrigin` (singular) — a field that doesn't exist
-on the config object (it's `corsOrigins`, plural, already parsed into an
-array). This always silently fell back to localhost regardless of what
-CORS_ORIGIN was actually set to in the environment. Fixed to read the
-real field.
+Included. Same raw-`fetch` CSRF bug as `Contact.tsx`, in the client
+logout call. Fixed to use `secureFetch`.
 
-Rate limiter using a store that was never actually active
----------------------------------------------------------------
-middleware/rate-limit.js tried to use Redis (rate-limit-redis/ioredis),
-falling back to a plain in-memory store if REDIS_URL wasn't set — which
-it never was, and there's no Redis infrastructure anywhere in this
-project. So it was silently running the non-cluster-safe in-memory store
-this whole time. Meanwhile, a Postgres-backed store
-(lib/rate-limit-store.js) already existed, matching the rate_limits table
-from migration 005 — but it used the OLD express-rate-limit v2-5 callback
-API (incr(key, cb)), while package.json has express-rate-limit@8, which
-requires the newer async increment()/decrement()/resetKey() interface.
-Rewrote the store to match the installed version and wired it in as the
-actual store — no Redis needed, uses the Postgres you already have.
-Also fixed an IPv6 key-generation bug this introduced (express-rate-limit
-warns loudly if you build a rate-limit key from req.ip without their
-ipKeyGenerator() helper, since raw IPv6 addresses have multiple
-equivalent notations that could bypass the limit) — caught this during
-testing, not initially.
+## `frontend/src/pages/ClientLogin.tsx` — full file replacement
 
-A tool endpoint that called a script that doesn't exist
----------------------------------------------------------------
-routes/tools.js spawned `scripts/login-tool.js` — a file that isn't
-anywhere in the repo. Every call would fail with ENOENT. (In practice
-this was never reachable anyway — dashboard.js doesn't call this route
-at all.) Repointed it at tools/auth_audit.py, which is real, already in
-the repo, and actually does something. Requires python3 + the `requests`
-package on whatever host runs this.
+Included. Minor lint fix only (`catch (err: any)` → `catch (err:
+unknown)` with a proper type guard). No behavior change — verified
+this file's separate `secureFetch` implementation (from
+`lib/security.ts`) was already correct with a live cross-origin client
+login round trip.
 
-Frontend calling a hardcoded relative path
----------------------------------------------
-Contact.tsx did `fetch('/api/contact')` instead of using API_BASE (which
-this project already has, and other components like DefenseMatrix.tsx
-already use correctly). This only works if the frontend and backend are
-on the same domain — if you deploy the frontend to Vercel and the backend
-somewhere else (which the whole VITE_API_BASE_URL mechanism exists to
-support), this would 404 against Vercel's own domain. Fixed.
+## `README.md` — full file replacement
 
-=========================================================================
-TESTED, NOT JUST WRITTEN
-=========================================================================
-Ran a full boot against a real local PostgreSQL instance and confirmed,
-via actual HTTP requests: server starts clean (zero errors, including the
-IPv6 warning I introduced and then fixed) — all 9 migrations apply in
-order — admin login works — /me works — contact form submission works,
-including with & and " in the input, verified NOT double-escaped —
-public status endpoint returns real data with no auth header — list/
-search/PATCH status/DELETE all work on real rows — logout genuinely
-revokes the token (401 on next request with the same cookie, not just a
-cleared cookie client-side) — both health check endpoints work, and the
-deep one correctly reflects real DB connectivity.
+Included. Your old `README.md` was a leftover fix-checklist from an
+earlier session, describing a major backend rewrite (CommonJS→ESM,
+table-name fixes, wrong bcrypt package, etc.) as still pending. I
+checked every item in it against the current code — **all already
+fixed**. The new version is a normal, accurate project README:
+description, setup steps, current file structure, and a short honest
+list of remaining tidiness items (the dead files/docs deleted above,
+plus a note that you have two separate-but-both-correct `secureFetch`
+implementations worth consolidating someday).
 
-Frontend: full npm run build with the Contact.tsx fix — clean, zero
-TypeScript errors.
+---
 
-One thing I could NOT test end-to-end: the tools.js -> auth_audit.py path,
-since that needs python3 + pip packages installed, which isn't part of
-this Node sandbox. The Node side (spawning, JSON parsing, error handling,
-storing the run) is written and would fail cleanly with a clear error
-message if python3/requests aren't available on whatever host runs it —
-worth an early real-world test after deploying.
+## Not touched, worth a quick look yourself
+
+`RAILWAY_SETUP.md` — spot-checked and looks current, unlike the four
+deleted docs, but I didn't do a full line-by-line pass on it the way I
+did everything else here.
