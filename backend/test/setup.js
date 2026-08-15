@@ -21,7 +21,7 @@ await adminPool.query(`CREATE DATABASE ${testDbName}`);
 await adminPool.end();
 
 process.env.NODE_ENV = 'development'; // avoid tripping CORS_ORIGIN's production-only requirement
-process.env.JWT_SECRET = 'test-secret-not-for-real-use-0123456789abcdef';
+process.env.JWT_SECRET = 'kQ7mZx2Rp9LtVb4WnJf8CyU3HdEa6Ns1Mg5X';
 process.env.DATABASE_URL = `${baseUrl}/${testDbName}`;
 process.env.DB_SSL = 'false';
 process.env.CORS_ORIGIN = 'http://localhost:3000';
