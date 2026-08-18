@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-   "create-admin": "node src/scripts/create-admin.js",
+    "create-admin": "node src/scripts/create-admin.js",
     "migrate": "node src/migrate.js",
     "test": "vitest run"
   },
@@ -28,6 +28,10 @@
     "resend": "^4.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
     "supertest": "^7.2.2",
     "vitest": "^4.1.10"
   }
