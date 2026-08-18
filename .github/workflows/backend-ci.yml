@@ -17,6 +17,23 @@ jobs:
       run:
         working-directory: backend
 
+    # .env.example's DATABASE_URL points at alux:password@localhost:5432/alux_plaza —
+    # this service must match those exact credentials or the server can't boot.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: alux
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: alux_plaza
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
       - uses: actions/checkout@v4
 
@@ -33,7 +50,12 @@ jobs:
       - name: Boot the server and smoke-test the API
         run: |
           cp .env.example .env
-          sed -i "s/change-this-to-a-long-random-string/$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")/" .env
+          # NOTE: this must match the literal placeholder text currently in
+          # .env.example. If that file's placeholder ever changes, update
+          # this sed pattern too, or the JWT_SECRET silently never gets
+          # replaced and the server refuses to boot (weak-secret check).
+          sed -i "s/your-64-char-random-secret-here-change-me/$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")/" .env
+
           node src/index.js &
           SERVER_PID=$!
           sleep 2
@@ -47,24 +69,48 @@ jobs:
           echo "Checking /api/status/defense-matrix..."
           curl -sf http://localhost:4000/api/status/defense-matrix
 
+          # CSRF is enforced globally on all non-GET requests — a bare curl
+          # POST with no prior GET (to receive the csrfToken cookie) and no
+          # x-csrf-token header gets rejected with 403, not a real response.
+          echo "Seeding CSRF cookie..."
+          curl -sf -c cookies.txt http://localhost:4000/api/health > /dev/null
+          CSRF=$(grep csrfToken cookies.txt | awk '{print $7}')
+
           echo "Submitting a test contact form entry..."
-          curl -sf -X POST http://localhost:4000/api/contact \
+          curl -sf -b cookies.txt -X POST http://localhost:4000/api/contact \
             -H "Content-Type: application/json" \
-            -d '{"firstName":"CI","lastName":"Test","email":"ci@example.com","message":"automated smoke test"}'
+            -H "x-csrf-token: $CSRF" \
+            -d '{"name":"CI Test","email":"ci@example.com","message":"automated smoke test"}'
 
           kill $SERVER_PID
 
-      - name: Verify honeypot field rejects bot-shaped submissions
+      - name: Verify honeypot field silently no-ops bot-shaped submissions
         run: |
+          # NOTE: the honeypot field is named `honeypot` in the actual API
+          # (not `website`), and a submission that fills it in intentionally
+          # gets a 200 + fake "success" response, not a 400 — the whole
+          # point of a honeypot is to not tip off the bot that it was
+          # caught. Asserting 400 here would make this test pass for the
+          # wrong reason (missing required `name` field) while never
+          # actually exercising the honeypot branch at all.
           node src/index.js &
           SERVER_PID=$!
           sleep 2
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:4000/api/contact \
+
+          curl -sf -c cookies.txt http://localhost:4000/api/health > /dev/null
+          CSRF=$(grep csrfToken cookies.txt | awk '{print $7}')
+
+          RESPONSE=$(curl -s -b cookies.txt -X POST http://localhost:4000/api/contact \
             -H "Content-Type: application/json" \
-            -d '{"firstName":"Bot","lastName":"Spam","email":"bot@spam.com","website":"http://spam.com"}')
+            -H "x-csrf-token: $CSRF" \
+            -d '{"name":"Bot","email":"bot@spam.com","message":"spam message","honeypot":"filled-by-bot"}')
           kill $SERVER_PID
-          if [ "$STATUS" != "400" ]; then
-            echo "Expected honeypot submission to be rejected with 400, got $STATUS"
+          if ! echo "$RESPONSE" | grep -q '"success":true'; then
+            echo "Expected honeypot submission to get a fake-success response, got: $RESPONSE"
             exit 1
           fi
-          echo "Honeypot correctly rejected with 400"
+          if echo "$RESPONSE" | grep -q '"id"'; then
+            echo "Honeypot submission was actually saved to the database (should be a no-op): $RESPONSE"
+            exit 1
+          fi
+          echo "Honeypot correctly short-circuited with a no-op fake-success response"
