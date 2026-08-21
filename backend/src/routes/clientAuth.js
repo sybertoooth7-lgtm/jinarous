@@ -109,6 +109,16 @@ router.post('/login', [
       [client.id]
     );
 
+    // New-device detection MUST run before logLoginAttempt() records this
+    // login as a success — isNewIp() looks for a prior successful login
+    // from this IP, and logLoginAttempt() inserts exactly that kind of
+    // row. Checking after logging meant isNewIp() always found this
+    // login's own just-inserted row and concluded "not new" — every
+    // single time, for every client, including their very first login
+    // ever. Confirmed live: newDeviceAlert came back false on a client's
+    // first-ever successful login before this fix.
+    const newDevice = await isNewIp(client.id, req.ip);
+
     // Log success
     await logLoginAttempt({
       clientId: client.id,
@@ -118,8 +128,6 @@ router.post('/login', [
       userAgent: req.headers['user-agent'],
     });
 
-    // New-device detection
-    const newDevice = await isNewIp(client.id, req.ip);
     if (newDevice) {
       await alertNewDevice({
         clientId: client.id,
