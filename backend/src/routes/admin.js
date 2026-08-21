@@ -18,6 +18,19 @@ const DUMMY_HASH = '$2b$12$c.ByGOhklqTXtY6UiWrCieVW3v1ZsI5tlBj/MfE9V92LjUYa9iuHu
 
 const VALID_STATUSES = ['new', 'read', 'replied', 'archived'];
 
+// Per-account lockout, mirroring clientAuth.js's — see the comment in
+// migrations/017_add_admin_lockout.sql for why this exists and why the
+// numbers are deliberately much shorter than the client version.
+const MAX_FAILED_ATTEMPTS = 5;
+const BASE_LOCKOUT_MINUTES = 5;
+const MAX_LOCKOUT_MINUTES = 30;
+
+function computeLockoutMinutes(failedCount) {
+  if (failedCount < MAX_FAILED_ATTEMPTS) return 0;
+  const minutes = BASE_LOCKOUT_MINUTES * Math.pow(2, failedCount - MAX_FAILED_ATTEMPTS);
+  return Math.min(minutes, MAX_LOCKOUT_MINUTES);
+}
+
 function parseExpiryToMs(value, fallbackMs) {
   if (!value) return fallbackMs;
   const match = String(value).trim().match(/^(\d+)\s*(ms|s|m|h|d)?$/i);
@@ -48,14 +61,41 @@ router.post('/login', [
     const result = await db.query('SELECT * FROM admin_users WHERE email = $1', [email]);
     const user = result.rows[0];
 
+    // Account-level lockout check (before bcrypt to save CPU) — same
+    // ordering rationale as clientAuth.js.
+    if (user?.locked_until && new Date(user.locked_until) > new Date()) {
+      const remainingSec = Math.ceil((new Date(user.locked_until) - new Date()) / 1000);
+      return res.status(423).json({
+        error: 'Account temporarily locked due to repeated failed login attempts.',
+        retryAfter: remainingSec,
+      });
+    }
+
     const passwordMatches = await bcrypt.compare(password, user?.password_hash || DUMMY_HASH);
     if (!user || !passwordMatches) {
+      if (user) {
+        const newCount = (user.failed_login_count || 0) + 1;
+        const lockoutMinutes = computeLockoutMinutes(newCount);
+        const lockedUntil = lockoutMinutes > 0
+          ? new Date(Date.now() + lockoutMinutes * 60 * 1000)
+          : null;
+        await db.query(
+          'UPDATE admin_users SET failed_login_count = $1, locked_until = $2 WHERE id = $3',
+          [newCount, lockedUntil, user.id]
+        );
+      }
       const nowBlocked = await recordFailedLogin(req.ip);
       if (nowBlocked) {
         return res.status(403).json({ error: 'Too many failed attempts. Access denied.' });
       }
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+
+    // Successful login — reset failure counter
+    await db.query(
+      'UPDATE admin_users SET failed_login_count = 0, locked_until = NULL WHERE id = $1',
+      [user.id]
+    );
 
     const jti = crypto.randomUUID();
     const token = jwt.sign(
