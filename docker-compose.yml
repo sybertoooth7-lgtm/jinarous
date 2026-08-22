@@ -44,7 +44,16 @@ services:
       # override it in .env got a publicly-known secret instead of a
       # clear failure. Failing loud here is safer than failing loud only
       # sometimes, deep inside the app.
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env — generate one with: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"}
+      #
+      # Generate one with:
+      #   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+      #
+      # NOTE: the :? message below must stay free of quotes and
+      # colon-space sequences — an earlier version read "generate one
+      # with: node -e ..." inside this unquoted scalar and the ": " made
+      # the whole file invalid YAML, breaking every docker compose
+      # command including plain config validation.
+      JWT_SECRET: '${JWT_SECRET:?JWT_SECRET must be set in .env — generate one using the node command in the comment above}'
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
       # CORS_ORIGIN, not FRONTEND_URL — matches what config.js/index.js
       # actually read. The old FRONTEND_URL var here was silently ignored.
