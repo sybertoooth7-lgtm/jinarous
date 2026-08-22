@@ -50,6 +50,11 @@ jobs:
       - name: Boot the server and smoke-test the API
         run: |
           cp .env.example .env
+          # .env.example ships NODE_ENV=production as a reminder for real
+          # deploys — left as-is here, cookies go Secure-only and curl never
+          # sends them back over plain http://localhost, silently breaking
+          # the CSRF-cookie contact-form step below.
+          sed -i "s/NODE_ENV=production/NODE_ENV=development/" .env
           # NOTE: this must match the literal placeholder text currently in
           # .env.example. If that file's placeholder ever changes, update
           # this sed pattern too, or the JWT_SECRET silently never gets
@@ -58,10 +63,21 @@ jobs:
 
           node src/index.js &
           SERVER_PID=$!
-          sleep 2
 
-          echo "Checking /api/health..."
-          curl -sf http://localhost:4000/api/health
+          # Flaked before on a hard-coded `sleep 2` (failed once, passed on
+          # rerun) — poll /api/health instead of guessing a fixed delay.
+          echo "Waiting for server to become healthy..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/api/health > /dev/null 2>&1; then
+              echo "Server is up after ${i} attempt(s)"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Server failed to become healthy after 30 attempts"
+              exit 1
+            fi
+            sleep 0.5
+          done
 
           echo "Checking /api/health/deep..."
           curl -sf http://localhost:4000/api/health/deep
@@ -95,7 +111,18 @@ jobs:
           # actually exercising the honeypot branch at all.
           node src/index.js &
           SERVER_PID=$!
-          sleep 2
+
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4000/api/health > /dev/null 2>&1; then
+              echo "Server is up after ${i} attempt(s)"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Server failed to become healthy after 30 attempts"
+              exit 1
+            fi
+            sleep 0.5
+          done
 
           curl -sf -c cookies.txt http://localhost:4000/api/health > /dev/null
           CSRF=$(grep csrfToken cookies.txt | awk '{print $7}')
