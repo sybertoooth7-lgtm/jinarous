@@ -41,7 +41,7 @@ the deployed frontend can reach a backend on a different host.
 \`\`\`
 backend/
   migrations/          numbered .sql files, applied in filename order
-                        (currently 001–016; run `npm run migrate`)
+                        (currently 001–017; run `npm run migrate`)
   src/
     routes/             admin.js, adminClients.js, adminRiskScore.js,
                          adminSecurity.js, clientAuth.js,
@@ -68,15 +68,18 @@ frontend/
                           python3 + `requests` on whatever host runs it
 \`\`\`
 
-## Known cleanup items (not bugs, just tidiness)
+## Known limitations
 
-- `backend/public/admin/admin.js` / `admin.css` — dead files, not
-  loaded anywhere (`index.html` loads `dashboard.js`/`styles.css`
-  instead). Safe to delete.
-- A root-level `migrations/` folder (separate from `backend/migrations/`)
-  contains 2 files that never run — the migration runner only reads
-  `backend/migrations/`. Safe to delete.
-- `DOCKER_CI_README.md` and `PACKAGE_INSTALL.md` describe an earlier,
-  Redis-based rate-limiting design that's since been replaced by the
-  Postgres-backed store in `backend/src/lib/rate-limit-store.js`. Safe
-  to delete — superseded, not accurate to the current setup.
+- Shield's request-volume counter (`bruteForceGuard.js`) is in-memory
+  per process: with `CLUSTER_MODE=true` each worker counts separately
+  and blocks later than expected. Production runs single-process
+  (`CLUSTER_MODE=false`, see `.env.railway`), where this is fine; CI's
+  security job forces cluster mode off for the same reason. Move the
+  counters into Postgres if you ever scale past one backend instance.
+- Migration numbering skips 008 (file was removed after being
+  superseded). The runner applies whatever files exist in filename
+  order, so the gap is harmless.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -46,10 +46,17 @@ jobs:
           # string "innerHTML" flags dashboard.js's own safe, intentional
           # container-clearing code as if it were unescaped user-data
           # injection, which it isn't.
+          #
+          # The trailing `|| true` matters: when every match is filtered
+          # out (i.e. the code is CLEAN), the last grep exits 1, and under
+          # GitHub Actions' default `bash -e` that non-zero status aborts
+          # the step at the MATCHES= assignment — before the [ -n ] branch
+          # below ever runs. Without it this check could only ever pass
+          # when suspicious code EXISTS, which is exactly backwards.
           MATCHES=$(grep -n "innerHTML" public/admin/dashboard.js \
             | grep -v "innerHTML = ''" \
             | grep -v 'innerHTML = ""' \
-            | grep -vE ':\s*(\*|//|/\*)')
+            | grep -vE ':\s*(\*|//|/\*)' || true)
           if [ -n "$MATCHES" ]; then
             echo "Found suspicious innerHTML usage — XSS risk!"
             echo "$MATCHES"
@@ -259,6 +266,15 @@ jobs:
         run: |
           cp .env.example .env
           sed -i "s/your-64-char-random-secret-here-change-me/$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")/" .env
+          # Force single-process mode for this job. Shield's request-volume
+          # counter (bruteForceGuard.js) is deliberately in-memory per
+          # process — under cluster mode every worker keeps its OWN Map, so
+          # 105 test requests split across 4 workers ≈ 26 per worker, far
+          # below the 100-request block threshold, and the rate-limiting
+          # test below fails deterministically. Production runs
+          # CLUSTER_MODE=false (see .env.railway), so testing against a
+          # single process is also what actually matches deployment.
+          sed -i "s/^CLUSTER_MODE=.*/CLUSTER_MODE=false/" .env
 
           node src/index.js &
           sleep 3
@@ -454,7 +470,15 @@ jobs:
 
       - name: Test docker-compose
         run: |
-          docker compose -f docker-compose.yml config > /dev/null
+          # The compose file declares POSTGRES_PASSWORD and JWT_SECRET with
+          # `${VAR:?msg}` (required, deliberately no default — see the
+          # comments in docker-compose.yml). `docker compose config`
+          # therefore fails unless both are present in the environment, so
+          # validation-only runs must inject throwaway values. These never
+          # reach a running container; they only satisfy interpolation.
+          POSTGRES_PASSWORD=ci-interpolation-placeholder \
+          JWT_SECRET=ci-interpolation-placeholder \
+            docker compose -f docker-compose.yml config > /dev/null
           echo "Docker Compose config valid"
 
   # ─────────────────────────────────────────

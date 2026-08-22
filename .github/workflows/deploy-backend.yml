@@ -20,6 +20,23 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      - name: Verify RAILWAY_TOKEN is configured
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          # `railway up` fails within a second when the token is missing or
+          # blank, with a message that doesn't mention the secret at all.
+          # Fail here instead, with instructions that actually lead to a
+          # fix. Generate a new token: Railway dashboard → Account
+          # Settings → API Tokens, then update the RAILWAY_TOKEN repo
+          # secret (Settings → Secrets and variables → Actions).
+          if [ -z "$RAILWAY_TOKEN" ]; then
+            echo "::error::RAILWAY_TOKEN repo secret is not set (or empty)."
+            echo "Fix: create a Team/Account token in Railway → Account Settings → API Tokens,"
+            echo "then add it as the RAILWAY_TOKEN secret under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
