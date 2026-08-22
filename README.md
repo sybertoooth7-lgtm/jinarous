@@ -11,19 +11,21 @@ Protection Act 2019.
 - **Frontend:** React 19 / Vite / TypeScript / Tailwind.
 - **Repo:** `github.com/sybertoooth7-lgtm/jinarous`
 - **Deploy:** frontend on Vercel (`jinarous.vercel.app`), backend on
-  Railway.
+  Render (free) with a Neon Postgres — see [RENDER_SETUP.md](RENDER_SETUP.md).
 
 ## Local setup
 
-\`\`\`bash
+```bash
 # Backend
 cd backend
-cp env.example .env   # fill in DATABASE_URL, JWT_SECRET (random, ≥32
+cp .env.example .env   # fill in DATABASE_URL, JWT_SECRET (random, ≥32
                        # chars, no dictionary words — config.js checks
                        # this at boot), CORS_ORIGIN
 npm install
 npm run migrate        # applies backend/migrations/*.sql in order
-npm run create-admin    # interactive prompt, run in a real terminal
+                       # (also auto-runs on every server boot)
+npm run create-admin    # interactive prompt; or set ADMIN_BOOTSTRAP_EMAIL
+                        # + ADMIN_BOOTSTRAP_PASSWORD and skip this
 npm run dev
 
 # Frontend
@@ -73,7 +75,7 @@ frontend/
 - Shield's request-volume counter (`bruteForceGuard.js`) is in-memory
   per process: with `CLUSTER_MODE=true` each worker counts separately
   and blocks later than expected. Production runs single-process
-  (`CLUSTER_MODE=false`, see `.env.railway`), where this is fine; CI's
+  (`render.yaml` sets `CLUSTER_MODE=false`), where this is fine; CI's
   security job forces cluster mode off for the same reason. Move the
   counters into Postgres if you ever scale past one backend instance.
 - Migration numbering skips 008 (file was removed after being

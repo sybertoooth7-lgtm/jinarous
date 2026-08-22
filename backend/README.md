@@ -69,14 +69,17 @@ CREATEDB — a fresh uniquely-named DB is created per test file.
 
 ## Deploying
 
-Production deploys to Railway automatically: pushes to `main` trigger
-Backend CI (`.github/workflows/backend-ci.yml`), and on success
-`deploy-backend.yml` runs `railway up`. That workflow needs a
-`RAILWAY_TOKEN` repo secret (Railway → Account Settings → API Tokens).
-Required env vars on the Railway service mirror `.env.railway`.
+Production deploys to Render automatically: pushes to `main` under
+`backend/**` run Backend CI, then Render's GitHub integration
+auto-deploys the commit. The service is defined by the root-level
+`render.yaml` blueprint; full walkthrough (including the free Neon
+Postgres setup) is in [RENDER_SETUP.md](../RENDER_SETUP.md).
 
-Run `npm run migrate` against production once after the first deploy,
-then `npm run create-admin`.
+Migrations apply themselves on every boot (`src/db.js`), and the first
+admin account can be created without shell access by setting
+`ADMIN_BOOTSTRAP_EMAIL` + `ADMIN_BOOTSTRAP_PASSWORD` before booting —
+the bootstrap fires only while `admin_users` is empty, so remove both
+vars after the first login.
 
 ## Security notes
 

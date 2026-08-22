@@ -1,0 +1,55 @@
+# Render Blueprint — Alux Plaza backend
+#
+# Deploys the Express API as a free Render web service. Pair it with a
+# free external Postgres (Neon is the recommended default — see
+# RENDER_SETUP.md) and paste its connection string into DATABASE_URL
+# when prompted during the blueprint deploy.
+#
+# One-click entry point:
+#   https://render.com/deploy?repo=https://github.com/sybertoooth7-lgtm/jinarous
+#
+# Migrations do NOT need a manual step: src/db.js runs
+# migrations/*.sql automatically on every boot, and the first admin
+# account can be bootstrapped from env vars (see ADMIN_BOOTSTRAP_*
+# below) so no shell access is ever required on the host.
+
+services:
+  - type: web
+    name: alux-plaza-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGIN
+        value: https://jinarous.vercel.app
+      - key: DB_SSL
+        value: "true"
+      # Cluster mode stays off: each worker would open its own Postgres
+      # pool and keep its own in-memory Shield counters — pointless at
+      # free-tier size and harmful to both connection limits and the
+      # accuracy of volume-based blocking.
+      - key: CLUSTER_MODE
+        value: "false"
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      # Render generates a random secret at first deploy. Rotating it
+      # invalidates all existing sessions — acceptable, expected.
+      - key: JWT_SECRET
+        generateValue: true
+      # Paste your Neon (or other managed Postgres) connection string.
+      # Must include ?sslmode=require.
+      - key: DATABASE_URL
+        sync: false
+      # First-admin bootstrap: used exactly once, only while the
+      # admin_users table is empty, then rendered inert forever after.
+      # Remove both vars from the dashboard after first login anyway.
+      - key: ADMIN_BOOTSTRAP_EMAIL
+        sync: false
+      - key: ADMIN_BOOTSTRAP_PASSWORD
+        sync: false

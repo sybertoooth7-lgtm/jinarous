@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import cluster from 'cluster';
 import os from 'os';
+import bcrypt from 'bcryptjs';
 import pinoHttp from 'pino-http';
 import { config } from './config.js';
 import db, { initDb } from './db.js';
@@ -153,7 +154,31 @@ async function main() {
   try {
     const { rows } = await db.query('SELECT COUNT(*) AS count FROM admin_users');
     if (parseInt(rows[0].count, 10) === 0) {
-      logger.warn('No admin users exist yet. Run `npm run create-admin` once.');
+      // Hosts without shell access (Render free tier, most PaaS free
+      // plans) can't run `npm run create-admin` interactively. These
+      // env vars let the very first boot create the initial admin.
+      // The branch only ever fires while the table is empty, so the
+      // vars become inert after the first login — remove them anyway.
+      const bootstrapEmail = process.env.ADMIN_BOOTSTRAP_EMAIL?.trim().toLowerCase();
+      const bootstrapPassword = process.env.ADMIN_BOOTSTRAP_PASSWORD;
+
+      if (bootstrapEmail && bootstrapPassword) {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(bootstrapEmail)) {
+          logger.error('ADMIN_BOOTSTRAP_EMAIL is not a valid email address — admin bootstrap skipped.');
+        } else if (bootstrapPassword.length < 8) {
+          logger.error('ADMIN_BOOTSTRAP_PASSWORD is shorter than 8 characters — admin bootstrap skipped.');
+        } else {
+          const hash = await bcrypt.hash(bootstrapPassword, 12);
+          await db.query(
+            'INSERT INTO admin_users (email, password_hash) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING',
+            [bootstrapEmail, hash]
+          );
+          logger.warn(`Bootstrapped initial admin account: ${bootstrapEmail}`);
+          logger.warn('Remove ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD from the host env vars now.');
+        }
+      } else {
+        logger.warn('No admin users exist yet. Run `npm run create-admin` once, or set ADMIN_BOOTSTRAP_EMAIL + ADMIN_BOOTSTRAP_PASSWORD to create the first admin automatically on boot.');
+      }
     }
   } catch (err) {
     logger.error(`Failed to check for admin users: ${err.message}`);
