@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { body, param, validationResult } from 'express-validator';
 import db from '../db.js';
 import { recordAuditLog } from '../middleware/auditLog.js';
+import DOMPurify from 'isomorphic-dompurify';
 
 const router = Router();
 
@@ -184,6 +185,9 @@ router.patch('/:id/compliance/:itemId', [
   const { status, notes } = req.body;
   const adminEmail = req.user?.email || 'unknown';
 
+  // Sanitize notes before storing
+  const sanitizedNotes = DOMPurify.sanitize(notes || '');
+
   try {
     const before = await db.query(
       'SELECT status, notes FROM client_compliance_status WHERE client_id = $1 AND item_id = $2',
@@ -196,7 +200,7 @@ router.patch('/:id/compliance/:itemId', [
        DO UPDATE SET status = EXCLUDED.status, notes = EXCLUDED.notes,
                      updated_by = EXCLUDED.updated_by, updated_at = NOW()
        RETURNING *`,
-      [req.params.id, req.params.itemId, status, notes || null, adminEmail]
+      [req.params.id, req.params.itemId, status, sanitizedNotes || null, adminEmail]
     );
     await recordAuditLog({
       adminEmail,
@@ -204,7 +208,7 @@ router.patch('/:id/compliance/:itemId', [
       targetTable: 'client_compliance_status',
       targetId: `${req.params.id}:${req.params.itemId}`,
       oldValue: before.rows[0] || null,
-      newValue: { status, notes: notes || null },
+      newValue: { status, notes: sanitizedNotes || null },
     });
     res.json({ success: true, status: result.rows[0] });
   } catch (err) {
