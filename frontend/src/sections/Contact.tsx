@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { API_BASE } from '@/lib/api';
-import { secureFetch } from '../lib/secureFetch';
+import { secureFetch } from '../lib/security';
 
 const MAX_MESSAGE = 5000;
 const MAX_COMPANY = 150;
@@ -44,7 +43,7 @@ export default function Contact() {
       // secureFetch attaches the CSRF header and sends credentials —
       // a plain fetch() here would fail with "CSRF token missing" and,
       // on a cross-origin deployment, wouldn't send/receive cookies at all.
-      const res = await secureFetch(`${API_BASE}/api/contact`, {
+      const res = await secureFetch('/api/contact', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
