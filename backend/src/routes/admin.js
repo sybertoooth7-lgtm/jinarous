@@ -7,6 +7,7 @@ import db from '../db.js';
 import { config } from '../config.js';
 import { requireAuth, blocklistToken } from '../middleware/auth.js';
 import { recordFailedLogin } from '../shield/bruteForceGuard.js';
+import { recordAuditLog } from '../middleware/auditLog.js';
 
 const router = Router();
 
@@ -218,6 +219,7 @@ router.patch('/submissions/:id/status', requireAuth, [
   }
 
   try {
+    const before = await db.query('SELECT status FROM contacts WHERE id = $1', [req.params.id]);
     const result = await db.query(
       'UPDATE contacts SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
       [req.body.status, req.params.id]
@@ -225,6 +227,14 @@ router.patch('/submissions/:id/status', requireAuth, [
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Submission not found' });
     }
+    await recordAuditLog({
+      adminEmail: req.user.email,
+      action: 'submission.status_update',
+      targetTable: 'contacts',
+      targetId: req.params.id,
+      oldValue: before.rows[0] ? { status: before.rows[0].status } : null,
+      newValue: { status: req.body.status },
+    });
     res.json({ success: true, submission: result.rows[0] });
   } catch (err) {
     console.error('[admin] Update status error:', err);
@@ -244,10 +254,18 @@ router.delete('/submissions/:id', requireAuth, [
   }
 
   try {
-    const result = await db.query('DELETE FROM contacts WHERE id = $1', [req.params.id]);
+    const result = await db.query('DELETE FROM contacts WHERE id = $1 RETURNING *', [req.params.id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Submission not found' });
     }
+    await recordAuditLog({
+      adminEmail: req.user.email,
+      action: 'submission.delete',
+      targetTable: 'contacts',
+      targetId: req.params.id,
+      oldValue: result.rows[0],
+      newValue: null,
+    });
     res.json({ success: true });
   } catch (err) {
     console.error('[admin] Delete submission error:', err);
