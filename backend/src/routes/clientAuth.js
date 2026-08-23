@@ -34,10 +34,6 @@ const MAX_FAILED_ATTEMPTS = 5;
 const BASE_LOCKOUT_MINUTES = 15;
 const MAX_LOCKOUT_MINUTES = 360; // 6 hours
 
-/**
- * Compute lockout duration with exponential backoff.
- * 5 fails → 15 min, 6 → 30 min, 7 → 60 min, capped at 6 hrs.
- */
 function computeLockoutMinutes(failedCount) {
   if (failedCount < MAX_FAILED_ATTEMPTS) return 0;
   const minutes = BASE_LOCKOUT_MINUTES * Math.pow(2, failedCount - MAX_FAILED_ATTEMPTS);
@@ -67,7 +63,14 @@ router.post('/login', [
     const result = await db.query('SELECT * FROM clients WHERE email = $1', [email]);
     const client = result.rows[0];
 
-    // Account-level lockout check (before password verify to save CPU)
+    // FIX C7: ALWAYS run bcrypt.compare to keep timing constant, regardless of
+    // whether the email exists or the account is locked. This prevents an
+    // attacker from distinguishing "email exists & locked" (fast 423) from
+    // "email doesn't exist" (slow bcrypt) by response time.
+    const passwordMatches = await bcrypt.compare(password, client?.password_hash || DUMMY_HASH);
+
+    // Now that bcrypt is done, check lockout. The timing difference between
+    // locked and non-locked is now just a few JS ops, not a full bcrypt round.
     if (client?.locked_until && new Date(client.locked_until) > new Date()) {
       const remainingSec = Math.ceil((new Date(client.locked_until) - new Date()) / 1000);
       return res.status(423).json({
@@ -76,7 +79,6 @@ router.post('/login', [
       });
     }
 
-    const passwordMatches = await bcrypt.compare(password, client?.password_hash || DUMMY_HASH);
     if (!client || !passwordMatches) {
       // Log the failed attempt
       await logLoginAttempt({
@@ -87,11 +89,7 @@ router.post('/login', [
         userAgent: req.headers['user-agent'],
       });
 
-      // IP-level guard: without this, an attacker can spray passwords
-      // across many different client accounts from one IP and never
-      // trigger a block — only the per-account lockout below applies,
-      // and that's keyed on email, not IP. admin.js already calls this;
-      // client login was missing it.
+      // IP-level guard
       await recordFailedLogin(req.ip);
 
       // Increment account-level failure count if the email exists
@@ -117,14 +115,6 @@ router.post('/login', [
       [client.id]
     );
 
-    // New-device detection MUST run before logLoginAttempt() records this
-    // login as a success — isNewIp() looks for a prior successful login
-    // from this IP, and logLoginAttempt() inserts exactly that kind of
-    // row. Checking after logging meant isNewIp() always found this
-    // login's own just-inserted row and concluded "not new" — every
-    // single time, for every client, including their very first login
-    // ever. Confirmed live: newDeviceAlert came back false on a client's
-    // first-ever successful login before this fix.
     const newDevice = await isNewIp(client.id, req.ip);
 
     // Log success
