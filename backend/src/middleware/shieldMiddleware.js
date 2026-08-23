@@ -25,10 +25,14 @@ import { logSecurityEvent } from '../shield/eventLogger.js';
 // free-text user input and (b) use parameterized queries downstream, so
 // there's no injection risk being traded away.
 //
-// Known to need this: /api/contact (message field).
-// If any other route accepts free-text notes/comments, add it here too —
-// confirm the exact path in the repo first rather than guessing it.
-const SIGNATURE_SCAN_EXEMPT_PATHS = ['/api/contact'];
+// NOTE: Every path in this list MUST end with a trailing slash check
+// or use .startsWith() so variations like /api/contact/123 don't leak
+// through un-scanned.
+const SIGNATURE_SCAN_EXEMPT_PATHS = [
+  '/api/contact',               // public contact form (message field)
+  '/api/admin/submissions',     // admin search queries (search param)
+  '/api/admin/clients',         // compliance notes (notes field on PATCH .../compliance/:itemId)
+];
 
 function getClientIp(req) {
   // Trust proxy must be enabled on the Express app (app.set('trust proxy', 1))
@@ -53,7 +57,11 @@ export async function shield(req, res, next) {
 
     // 3. Scan this request's content for known attack signatures —
     //    skipped for free-text endpoints listed above.
-    const isExempt = SIGNATURE_SCAN_EXEMPT_PATHS.some((p) => req.path.startsWith(p));
+    //    We check startsWith so /api/contact, /api/contact/, and
+    //    /api/contact/123 all get the same exemption.
+    const isExempt = SIGNATURE_SCAN_EXEMPT_PATHS.some((p) =>
+      req.path === p || req.path.startsWith(p + '/')
+    );
     const detection = isExempt ? null : scanRequest(req);
     if (detection) {
       await logSecurityEvent({
