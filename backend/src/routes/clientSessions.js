@@ -7,12 +7,6 @@ import { requireClientAuth } from '../middleware/clientAuth.js';
 
 const router = Router();
 
-/**
- * GET /api/client/sessions
- * List all active sessions for the logged-in client.
- * Excludes the current session's JTI so the user can't accidentally
- * revoke the session they're currently using.
- */
 router.get('/', requireClientAuth, async (req, res) => {
   try {
     const { rows } = await db.query(
@@ -39,30 +33,20 @@ router.get('/', requireClientAuth, async (req, res) => {
   }
 });
 
-/**
- * POST /api/client/sessions/:jti/revoke
- * Revoke a specific session (client can revoke their own).
- */
 router.post('/:jti/revoke', requireClientAuth, async (req, res) => {
   const { jti } = req.params;
-  // Prevent revoking the current session via this endpoint to avoid
-  // accidentally logging the user out while they're using the app.
-  // They should use /logout for that.
   if (jti === req.client.jti) {
     return res.status(400).json({ error: 'Use /logout to end your current session.' });
   }
 
   try {
     const result = await db.query(
-      `DELETE FROM client_sessions
-       WHERE jti = $1 AND client_id = $2
-       RETURNING jti`,
+      `DELETE FROM client_sessions WHERE jti = $1 AND client_id = $2 RETURNING jti`,
       [jti, req.client.sub]
     );
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Session not found or already expired.' });
     }
-    // Also blocklist the token so it can't be reused even if cached somewhere
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await db.query(
       `INSERT INTO token_blocklist (jti, expires_at) VALUES ($1, $2)
