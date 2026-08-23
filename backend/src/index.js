@@ -23,6 +23,9 @@ import adminSecurityRoutes from './routes/adminSecurity.js';
 import clientAuthRoutes from './routes/clientAuth.js';
 import complianceRoutes from './routes/compliance.js';
 import clientSecurityEventsRoutes from './routes/clientSecurityEvents.js';
+import clientSecurityEventsRoutes from './routes/clientSecurityEvents.js';
+import { requireAdmin, requireSuperAdmin } from './middleware/rbac.js';
+import adminUsersRoutes from './routes/adminUsers.js';
 import { setCsrfCookie, verifyCsrfToken } from './middleware/csrf.js';
 import adminMfaRoutes from './routes/adminMfa.js';
 import adminClientsRoutes from './routes/adminClients.js';
@@ -93,34 +96,35 @@ async function startServer() {
   });
 
   app.get('/api/health/deep', async (req, res) => {
-  app.use('/api/admin/security', requireAuth, adminSecurityRoutes);
-  app.use('/api/admin/mfa', requireAuth, adminMfaRoutes);
-  app.use('/api/client', clientAuthRoutes);
-    try {
-      await db.query('SELECT 1');
-      res.json({ status: 'ok', database: 'connected' });
-    } catch (err) {
-      res.status(503).json({ status: 'error', database: 'unreachable' });
-    }
-  });
-
-  app.use('/api', limiter);
+    app.use('/api', limiter);
   app.use('/api/admin/login', authLimiter);
   app.use('/api/client/login', authLimiter);
 
-  app.use('/api/contact', contactRoutes);
+  // Public / readonly-safe admin routes
   app.use('/api/admin', adminRoutes);
-  app.use('/api/status', statusRoutes);
-  app.use('/api/admin/tools', toolsRoutes);
-  app.use('/api/admin/security', requireAuth, adminSecurityRoutes);
+  app.use('/api/admin/mfa', requireAuth, adminMfaRoutes);
+
+  // Admin-only routes (readonly blocked)
+  app.use('/api/admin/security', requireAuth, requireAdmin, adminSecurityRoutes);
+  app.use('/api/admin/clients', requireAuth, requireAdmin, adminClientsRoutes);
+  app.use('/api/admin/clients/:id/risk-score-shares', requireAuth, requireAdmin, adminRiskScoreRoutes);
+  app.use('/api/admin/tools', requireAuth, requireAdmin, toolsRoutes);
+
+  // Superadmin-only routes
+  app.use('/api/admin/users', requireAuth, requireSuperAdmin, adminUsersRoutes);
+
+  // Client routes
   app.use('/api/client', clientAuthRoutes);
   app.use('/api/client/compliance', requireClientAuth, complianceRoutes);
-  app.use('/api/admin/clients', requireAuth, adminClientsRoutes);
-  app.use('/admin', express.static('public/admin'));
-  app.use('/api/admin/clients/:id/risk-score-shares', requireAuth, adminRiskScoreRoutes);
   app.use('/api/client/risk-score', requireClientAuth, clientRiskScoreRoutes);
-  app.use('/api/verify', verifyScoreRoutes);
   app.use('/api/client/security-events', requireClientAuth, clientSecurityEventsRoutes);
+  app.use('/api/client/sessions', requireClientAuth, clientSessionRoutes);
+
+  // Public routes
+  app.use('/api/contact', contactRoutes);
+  app.use('/api/status', statusRoutes);
+  app.use('/api/verify', verifyScoreRoutes);
+  app.use('/admin', express.static('public/admin'));
 
   app.use((err, req, res, next) => {
     if (err.type === 'entity.parse.failed') {
