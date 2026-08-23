@@ -114,7 +114,7 @@ router.post('/login', [
     // No MFA — issue full session immediately
     const jti = crypto.randomUUID();
     const token = jwt.sign(
-      { sub: user.id, email: user.email, jti },
+      { sub: user.id, email: user.email, jti, role: user.role },
       config.jwtSecret,
       { expiresIn: config.jwtExpiresIn }
     );
@@ -191,7 +191,7 @@ router.post('/mfa/verify', [
     // Issue full session
     const jti = crypto.randomUUID();
     const token = jwt.sign(
-      { sub: user.id, email: user.email, jti },
+      { sub: user.id, email: user.email, jti, role: user.role },
       config.jwtSecret,
       { expiresIn: config.jwtExpiresIn }
     );
