@@ -1,11 +1,10 @@
 // backend/src/jobs/cleanup.js
-// Nightly (or periodic) cleanup of expired token blocklist rows and
-// stale client sessions. Prevents unbounded table growth.
+// Periodic cleanup of expired token blocklist rows and stale sessions.
 
 import db from '../db.js';
 import { logger } from '../logger.js';
 
-const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 async function cleanupTokenBlocklist() {
   const result = await db.query(
@@ -63,7 +62,6 @@ export async function runCleanup() {
 }
 
 export function startCleanupScheduler() {
-  // Run immediately on boot, then every 24 hours
   runCleanup().catch(() => {});
   return setInterval(() => {
     runCleanup().catch(() => {});
