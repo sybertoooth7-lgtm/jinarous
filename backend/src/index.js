@@ -183,6 +183,23 @@ async function main() {
       } else {
         logger.warn('No admin users exist yet. Run `npm run create-admin` once, or set ADMIN_BOOTSTRAP_EMAIL + ADMIN_BOOTSTRAP_PASSWORD to create the first admin automatically on boot.');
       }
+    } else if (process.env.ADMIN_BOOTSTRAP_EMAIL || process.env.ADMIN_BOOTSTRAP_PASSWORD) {
+      // Admin(s) already exist, so these vars have no further effect on
+      // this boot — but leaving them set means anyone with read access to
+      // your host's env vars (Railway dashboard, a leaked env dump, a
+      // screen share) has a working admin email + plaintext password they
+      // can try directly against /api/admin/login, independent of whether
+      // this bootstrap branch ever runs again. Refuse to boot in
+      // production until both are removed, so this can't be silently
+      // forgotten past a warning log that scrolls out of view.
+      const message =
+        'ADMIN_BOOTSTRAP_EMAIL/ADMIN_BOOTSTRAP_PASSWORD are still set but an admin account already exists. Remove both from your host env vars and redeploy.';
+      if (config.isProduction) {
+        logger.error(message);
+        process.exit(1);
+      } else {
+        logger.warn(message);
+      }
     }
   } catch (err) {
     logger.error(`Failed to check for admin users: ${err.message}`);
