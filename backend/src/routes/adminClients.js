@@ -82,6 +82,58 @@ router.get('/', async (req, res) => {
 });
 
 /**
+ * POST /api/admin/clients/:id/sessions/revoke-all
+ * Admin-only: force-logout all sessions for a given client.
+ */
+router.post('/:id/sessions/revoke-all', [
+  param('id').isInt().withMessage('Invalid client id.'),
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const clientId = req.params.id;
+  const adminEmail = req.user?.email || 'unknown';
+
+  try {
+    const { rows } = await db.query(
+      `SELECT jti, expires_at FROM client_sessions WHERE client_id = $1 AND expires_at > NOW()`,
+      [clientId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'No active sessions found for this client.' });
+    }
+
+    await db.query('DELETE FROM client_sessions WHERE client_id = $1', [clientId]);
+
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    for (const row of rows) {
+      await db.query(
+        `INSERT INTO token_blocklist (jti, expires_at) VALUES ($1, $2)
+         ON CONFLICT (jti) DO NOTHING`,
+        [row.jti, expiresAt]
+      );
+    }
+
+    await recordAuditLog({
+      adminEmail,
+      action: 'client.sessions.revoke_all',
+      targetTable: 'client_sessions',
+      targetId: clientId,
+      oldValue: { active_sessions: rows.length },
+      newValue: { active_sessions: 0 },
+    });
+
+    res.json({ success: true, revokedCount: rows.length });
+  } catch (err) {
+    console.error('[adminClients] Admin revoke-all failed:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
  * GET /api/admin/clients/:id/compliance
  * Full checklist + this client's current status on each item.
  */
