@@ -56,6 +56,13 @@ if (!process.env.DATABASE_URL) {
   errors.push('DATABASE_URL is not set. PostgreSQL is required.');
 }
 
+// FIX C4: validate cookie secret
+if (!process.env.COOKIE_SECRET) {
+  errors.push('COOKIE_SECRET is not set. Cookie signatures cannot be verified.');
+} else if (process.env.COOKIE_SECRET.length < 32) {
+  errors.push('COOKIE_SECRET must be at least 32 characters.');
+}
+
 if (isProduction) {
   if (!process.env.CORS_ORIGIN) {
     errors.push('CORS_ORIGIN is not set in production. Refusing to start.');
@@ -95,4 +102,9 @@ export const config = {
     .filter(Boolean),
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
+  // FIX C4: export cookieSecret so cookieParser can use it
+  cookieSecret: process.env.COOKIE_SECRET,
+  // Export bootstrap credentials so index.js can read them
+  adminBootstrapEmail: process.env.ADMIN_BOOTSTRAP_EMAIL || null,
+  adminBootstrapPassword: process.env.ADMIN_BOOTSTRAP_PASSWORD || null,
 };
