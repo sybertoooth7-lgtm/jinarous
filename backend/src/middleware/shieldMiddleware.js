@@ -12,6 +12,24 @@ import { scanRequest } from '../shield/detector.js';
 import { recordRequest } from '../shield/bruteForceGuard.js';
 import { logSecurityEvent } from '../shield/eventLogger.js';
 
+// detector.js scans the ENTIRE request body/query as one blob (see
+// extractScannableContent in detector.js) — it can't tell "SELECT * FROM"
+// apart from someone typing "we need to select a union representative"
+// in a free-text field. A single match blocks that visitor's IP for
+// 6+ hours (see blockIp severity durations in shield/blocklist.js).
+//
+// Paths listed here skip signature scanning (step 3 below) but still go
+// through isBlocked() and recordRequest() — so volume-based abuse and
+// already-blocked IPs are still caught, just not single-word false
+// positives on legitimate free text. Only add paths here that (a) accept
+// free-text user input and (b) use parameterized queries downstream, so
+// there's no injection risk being traded away.
+//
+// Known to need this: /api/contact (message field).
+// If any other route accepts free-text notes/comments, add it here too —
+// confirm the exact path in the repo first rather than guessing it.
+const SIGNATURE_SCAN_EXEMPT_PATHS = ['/api/contact'];
+
 function getClientIp(req) {
   // Trust proxy must be enabled on the Express app (app.set('trust proxy', 1))
   // for req.ip to reflect the real client IP behind Railway's proxy.
@@ -33,8 +51,10 @@ export async function shield(req, res, next) {
       return res.status(403).json({ error: 'Access denied.' });
     }
 
-    // 3. Scan this request's content for known attack signatures.
-    const detection = scanRequest(req);
+    // 3. Scan this request's content for known attack signatures —
+    //    skipped for free-text endpoints listed above.
+    const isExempt = SIGNATURE_SCAN_EXEMPT_PATHS.some((p) => req.path.startsWith(p));
+    const detection = isExempt ? null : scanRequest(req);
     if (detection) {
       await logSecurityEvent({
         ip,
