@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { API_BASE } from '@/lib/api';
-import { secureFetch } from '@/lib/secureFetch';
+import { secureFetch } from '@/lib/security';
 
 interface ComplianceItem {
   id: number;
@@ -86,7 +86,7 @@ export default function ClientDashboard() {
     // POST — must go through secureFetch so the CSRF header is sent
     // (the backend enforces CSRF verification globally on all
     // non-GET requests, including this one).
-    await secureFetch(`${API_BASE}/api/client/logout`, { method: 'POST' }).catch(() => {});
+    await secureFetch('/api/client/logout', { method: 'POST' }).catch(() => {});
     navigate('/client/login');
   }
 
