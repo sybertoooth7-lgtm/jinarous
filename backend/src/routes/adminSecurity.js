@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import { listActiveBlocks, unblockIp } from '../shield/blocklist.js';
 import db from '../db.js';
+import { recordAuditLog } from '../middleware/auditLog.js';
 
 const router = Router();
 
@@ -33,6 +34,14 @@ router.get('/blocks', async (req, res) => {
 router.post('/blocks/:ip/unblock', async (req, res) => {
   try {
     await unblockIp(req.params.ip);
+    await recordAuditLog({
+      adminEmail: req.user?.email || 'unknown',
+      action: 'ip.unblock',
+      targetTable: 'blocked_ips',
+      targetId: req.params.ip,
+      oldValue: { blocked: true },
+      newValue: { blocked: false },
+    });
     res.json({ success: true, message: `${req.params.ip} unblocked.` });
   } catch (err) {
     console.error('[admin/security] failed to unblock:', err.message);
