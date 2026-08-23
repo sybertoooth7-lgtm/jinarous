@@ -63,14 +63,10 @@ router.post('/login', [
     const result = await db.query('SELECT * FROM clients WHERE email = $1', [email]);
     const client = result.rows[0];
 
-    // FIX C7: ALWAYS run bcrypt.compare to keep timing constant, regardless of
-    // whether the email exists or the account is locked. This prevents an
-    // attacker from distinguishing "email exists & locked" (fast 423) from
-    // "email doesn't exist" (slow bcrypt) by response time.
+    // === TIMING-SAFE: Always run bcrypt first ===
     const passwordMatches = await bcrypt.compare(password, client?.password_hash || DUMMY_HASH);
 
-    // Now that bcrypt is done, check lockout. The timing difference between
-    // locked and non-locked is now just a few JS ops, not a full bcrypt round.
+    // NOW check lockout (after bcrypt, so timing is constant)
     if (client?.locked_until && new Date(client.locked_until) > new Date()) {
       const remainingSec = Math.ceil((new Date(client.locked_until) - new Date()) / 1000);
       return res.status(423).json({
@@ -80,100 +76,37 @@ router.post('/login', [
     }
 
     if (!client || !passwordMatches) {
-      // Log the failed attempt
-      await logLoginAttempt({
-        clientId: client?.id ?? null,
-        email,
-        ip: req.ip,
-        success: false,
-        userAgent: req.headers['user-agent'],
-      });
-
-      // IP-level guard
+      await logLoginAttempt({ clientId: client?.id ?? null, email, ip: req.ip, success: false, userAgent: req.headers['user-agent'] });
       await recordFailedLogin(req.ip);
 
-      // Increment account-level failure count if the email exists
       if (client) {
         const newCount = (client.failed_login_count || 0) + 1;
         const lockoutMinutes = computeLockoutMinutes(newCount);
         const lockedUntil = lockoutMinutes > 0
           ? new Date(Date.now() + lockoutMinutes * 60 * 1000)
           : null;
-
-        await db.query(
-          'UPDATE clients SET failed_login_count = $1, locked_until = $2 WHERE id = $3',
-          [newCount, lockedUntil, client.id]
-        );
+        await db.query('UPDATE clients SET failed_login_count = $1, locked_until = $2 WHERE id = $3', [newCount, lockedUntil, client.id]);
       }
 
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Successful login — reset failure counters
-    await db.query(
-      'UPDATE clients SET failed_login_count = 0, locked_until = NULL WHERE id = $1',
-      [client.id]
-    );
-
+    // Success path continues unchanged...
+    await db.query('UPDATE clients SET failed_login_count = 0, locked_until = NULL WHERE id = $1', [client.id]);
     const newDevice = await isNewIp(client.id, req.ip);
-
-    // Log success
-    await logLoginAttempt({
-      clientId: client.id,
-      email,
-      ip: req.ip,
-      success: true,
-      userAgent: req.headers['user-agent'],
-    });
-
+    await logLoginAttempt({ clientId: client.id, email, ip: req.ip, success: true, userAgent: req.headers['user-agent'] });
     if (newDevice) {
-      await alertNewDevice({
-        clientId: client.id,
-        email: client.email,
-        ip: req.ip,
-        userAgent: req.headers['user-agent'],
-      });
+      await alertNewDevice({ clientId: client.id, email: client.email, ip: req.ip, userAgent: req.headers['user-agent'] });
     }
 
     const jti = crypto.randomUUID();
-    const token = jwt.sign(
-      {
-        sub: client.id,
-        email: client.email,
-        role: 'client',
-        jti,
-      },
-      config.jwtSecret,
-      { expiresIn: config.jwtExpiresIn }
-    );
-
+    const token = jwt.sign({ sub: client.id, email: client.email, role: 'client', jti }, config.jwtSecret, { expiresIn: config.jwtExpiresIn });
     await db.query(
-      `INSERT INTO client_sessions
-       (client_id, jti, ip_address, user_agent, expires_at)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (jti) DO NOTHING`,
-      [
-        client.id,
-        jti,
-        req.ip,
-        req.headers['user-agent'] || null,
-        new Date(Date.now() + COOKIE_MAX_AGE_MS),
-      ]
+      `INSERT INTO client_sessions (client_id, jti, ip_address, user_agent, expires_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (jti) DO NOTHING`,
+      [client.id, jti, req.ip, req.headers['user-agent'] || null, new Date(Date.now() + COOKIE_MAX_AGE_MS)]
     );
-
-    res.cookie('clientToken', token, {
-      httpOnly: true,
-      secure: config.isProduction,
-      sameSite: 'strict',
-      maxAge: COOKIE_MAX_AGE_MS,
-    });
-
-    res.json({
-      success: true,
-      email: client.email,
-      companyName: client.company_name,
-      newDeviceAlert: newDevice,
-    });
+    res.cookie('clientToken', token, { httpOnly: true, secure: config.isProduction, sameSite: 'strict', maxAge: COOKIE_MAX_AGE_MS });
+    res.json({ success: true, email: client.email, companyName: client.company_name, newDeviceAlert: newDevice });
   } catch (err) {
     console.error('[clientAuth] Login error:', err);
     res.status(500).json({ error: 'Internal server error' });
