@@ -19,7 +19,11 @@ export async function blocklistToken(jti, expiresAt) {
 async function isBlocklisted(jti) {
   if (!jti) return false;
   try {
-    const result = await db.query('SELECT 1 FROM token_blocklist WHERE jti = $1', [jti]);
+    // FIX C6: also check expires_at so stale entries don't stay blocked forever
+    const result = await db.query(
+      'SELECT 1 FROM token_blocklist WHERE jti = $1 AND expires_at > NOW()',
+      [jti]
+    );
     return result.rows.length > 0;
   } catch (err) {
     console.error('[auth] Blocklist check failed:', err.message);
