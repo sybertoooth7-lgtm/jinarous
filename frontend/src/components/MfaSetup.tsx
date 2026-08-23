@@ -2,8 +2,7 @@
 // Admin MFA enrollment flow: QR code display + verification.
 
 import { useState } from 'react';
-import { API_BASE } from '@/lib/api';
-import { secureFetch } from '@/lib/secureFetch';
+import { secureFetch } from '@/lib/security';
 
 export default function MfaSetup({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState<'start' | 'qr' | 'backup'>('start');
@@ -18,7 +17,7 @@ export default function MfaSetup({ onComplete }: { onComplete: () => void }) {
     setLoading(true);
     setError('');
     try {
-      const res = await secureFetch(`${API_BASE}/api/admin/mfa/enroll`, { method: 'POST' });
+      const res = await secureFetch('/api/admin/mfa/enroll', { method: 'POST' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Enrollment failed');
       setOtpauthUrl(data.otpauthUrl);
@@ -35,7 +34,7 @@ export default function MfaSetup({ onComplete }: { onComplete: () => void }) {
     setLoading(true);
     setError('');
     try {
-      const res = await secureFetch(`${API_BASE}/api/admin/mfa/verify-enrollment`, {
+      const res = await secureFetch('/api/admin/mfa/verify-enrollment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code }),
