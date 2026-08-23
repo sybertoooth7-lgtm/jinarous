@@ -6,6 +6,7 @@ import { body, param, query, validationResult } from 'express-validator';
 import db from '../db.js';
 import { config } from '../config.js';
 import { requireAuth, blocklistToken } from '../middleware/auth.js';
+import { requireAdmin } from '../middleware/rbac.js';
 import { recordFailedLogin } from '../shield/bruteForceGuard.js';
 import { recordAuditLog } from '../middleware/auditLog.js';
 
@@ -305,7 +306,7 @@ router.get('/submissions', requireAuth, [
 /**
  * PATCH /api/admin/submissions/:id/status
  */
-router.patch('/submissions/:id/status', requireAuth, [
+router.patch('/submissions/:id/status', requireAuth, requireAdmin, [
   param('id').isInt().withMessage('Invalid submission id.'),
   body('status').isIn(VALID_STATUSES),
 ], async (req, res) => {
@@ -341,7 +342,7 @@ router.patch('/submissions/:id/status', requireAuth, [
 /**
  * DELETE /api/admin/submissions/:id
  */
-router.delete('/submissions/:id', requireAuth, [
+router.delete('/submissions/:id', requireAuth, requireAdmin, [
   param('id').isInt().withMessage('Invalid submission id.'),
 ], async (req, res) => {
   const errors = validationResult(req);
