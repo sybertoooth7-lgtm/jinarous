@@ -19,11 +19,7 @@ export async function blocklistToken(jti, expiresAt) {
 async function isBlocklisted(jti) {
   if (!jti) return false;
   try {
-    // FIX C6: also check expires_at so stale entries don't stay blocked forever
-    const result = await db.query(
-      'SELECT 1 FROM token_blocklist WHERE jti = $1 AND expires_at > NOW()',
-      [jti]
-    );
+    const result = await db.query('SELECT 1 FROM token_blocklist WHERE jti = $1', [jti]);
     return result.rows.length > 0;
   } catch (err) {
     console.error('[auth] Blocklist check failed:', err.message);
@@ -49,9 +45,13 @@ export async function requireAuth(req, res, next) {
 
   try {
     const { rows } = await db.query('SELECT role FROM admin_users WHERE id = $1', [decoded.sub]);
-    if (rows.length > 0) decoded.role = rows[0].role;
+    if (rows.length === 0) {
+      return res.status(401).json({ error: 'Unauthorized: Account no longer exists' });
+    }
+    decoded.role = rows[0].role;
   } catch (err) {
     console.error('[auth] Failed to fetch role:', err.message);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 
   req.token = token;
