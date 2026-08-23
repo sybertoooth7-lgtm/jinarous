@@ -4,6 +4,7 @@
 // Requires: Redis (for caching known fingerprints per user).
 
 import db from '../db.js';
+import { sendNewDeviceAlert } from '../lib/email.js';
 
 const DUMMY_HASH = '$2b$12$c.ByGOhklqTXtY6UiWrCieVW3v1ZsI5tlBj/MfE9V92LjUYa9iuHu';
 
@@ -56,15 +57,15 @@ export async function isNewIp(clientId, ip) {
 }
 
 /**
- * Optional: Send email alert for new-device login.
- * Replace console.log with your email service (SendGrid, AWS SES, etc.)
+ * Send email alert for a new-device login via Resend (see lib/email.js).
+ * Logs regardless of whether the email actually sends, so this is always
+ * visible in server logs even when RESEND_API_KEY/FROM_EMAIL aren't set.
  */
 export async function alertNewDevice({ clientId, email, ip, userAgent }) {
   console.log(
     `[SECURITY] New device login for client ${clientId} (${email}) from IP ${ip}, UA: ${userAgent}`
   );
-  // TODO: integrate with your email provider
-  // await sendEmail({ to: email, subject: 'New login from unfamiliar device', ... });
+  await sendNewDeviceAlert({ email, ip, userAgent });
 }
 
 export { DUMMY_HASH };
