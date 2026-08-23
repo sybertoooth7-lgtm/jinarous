@@ -66,7 +66,11 @@ router.post('/login', [
     const result = await db.query('SELECT * FROM admin_users WHERE email = $1', [email]);
     const user = result.rows[0];
 
-    // Account-level lockout check (before bcrypt to save CPU)
+    // FIX C7: ALWAYS run bcrypt.compare to keep timing constant, regardless of
+    // whether the email exists or the account is locked.
+    const passwordMatches = await bcrypt.compare(password, user?.password_hash || DUMMY_HASH);
+
+    // Now that bcrypt is done, check lockout.
     if (user?.locked_until && new Date(user.locked_until) > new Date()) {
       const remainingSec = Math.ceil((new Date(user.locked_until) - new Date()) / 1000);
       return res.status(423).json({
@@ -75,7 +79,6 @@ router.post('/login', [
       });
     }
 
-    const passwordMatches = await bcrypt.compare(password, user?.password_hash || DUMMY_HASH);
     if (!user || !passwordMatches) {
       if (user) {
         const newCount = (user.failed_login_count || 0) + 1;
