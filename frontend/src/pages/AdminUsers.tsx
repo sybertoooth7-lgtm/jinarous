@@ -2,8 +2,7 @@
 // Superadmin-only: list, create, edit roles, delete admin users.
 
 import { useEffect, useState } from 'react';
-import { API_BASE } from '@/lib/api';
-import { secureFetch } from '@/lib/secureFetch';
+import { secureFetch } from '@/lib/security';
 
 interface AdminUser {
   id: number;
@@ -22,7 +21,7 @@ export default function AdminUsers() {
 
   async function loadUsers() {
     try {
-      const res = await secureFetch(`${API_BASE}/api/admin/users`);
+      const res = await secureFetch('/api/admin/users');
       if (!res.ok) throw new Error('Failed to load users');
       const data = await res.json();
       setUsers(data.users);
@@ -40,7 +39,7 @@ export default function AdminUsers() {
     setError('');
     setTempPassword('');
     try {
-      const res = await secureFetch(`${API_BASE}/api/admin/users`, {
+      const res = await secureFetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: newEmail, role: newRole }),
@@ -57,7 +56,7 @@ export default function AdminUsers() {
 
   async function changeRole(id: number, role: string) {
     try {
-      const res = await secureFetch(`${API_BASE}/api/admin/users/${id}/role`, {
+      const res = await secureFetch(`/api/admin/users/${id}/role`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role }),
@@ -72,7 +71,7 @@ export default function AdminUsers() {
   async function deleteUser(id: number) {
     if (!confirm('Delete this admin? This cannot be undone.')) return;
     try {
-      const res = await secureFetch(`${API_BASE}/api/admin/users/${id}`, { method: 'DELETE' });
+      const res = await secureFetch(`/api/admin/users/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete');
       loadUsers();
     } catch (err) {
