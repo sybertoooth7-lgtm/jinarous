@@ -22,6 +22,9 @@ import { requireAuth } from './middleware/auth.js';
 import adminSecurityRoutes from './routes/adminSecurity.js';
 import clientAuthRoutes from './routes/clientAuth.js';
 import complianceRoutes from './routes/compliance.js';
+import clientSecurityEventsRoutes from './routes/clientSecurityEvents.js';
+import { setCsrfCookie, verifyCsrfToken } from './middleware/csrf.js';
+import adminMfaRoutes from './routes/adminMfa.js';
 import adminClientsRoutes from './routes/adminClients.js';
 import { requireClientAuth } from './middleware/clientAuth.js';
 import clientRiskScoreRoutes from './routes/clientRiskScore.js';
@@ -90,6 +93,9 @@ async function startServer() {
   });
 
   app.get('/api/health/deep', async (req, res) => {
+  app.use('/api/admin/security', requireAuth, adminSecurityRoutes);
+  app.use('/api/admin/mfa', requireAuth, adminMfaRoutes);
+  app.use('/api/client', clientAuthRoutes);
     try {
       await db.query('SELECT 1');
       res.json({ status: 'ok', database: 'connected' });
