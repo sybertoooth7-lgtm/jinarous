@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { body, param, validationResult } from 'express-validator';
 import db from '../db.js';
+import { recordAuditLog } from '../middleware/auditLog.js';
 
 const router = Router();
 
@@ -38,6 +39,18 @@ router.post('/', [
        RETURNING id, company_name, email, created_at`,
       [companyName, email, passwordHash]
     );
+
+    // NOTE: intentionally not logging tempPassword or passwordHash here —
+    // the existing comment above already treats the plaintext temp
+    // password as never-logged; keep that guarantee in the audit trail too.
+    await recordAuditLog({
+      adminEmail: req.user?.email || 'unknown',
+      action: 'client.create',
+      targetTable: 'clients',
+      targetId: result.rows[0].id,
+      oldValue: null,
+      newValue: { company_name: result.rows[0].company_name, email: result.rows[0].email },
+    });
 
     res.status(201).json({
       client: result.rows[0],
@@ -120,6 +133,10 @@ router.patch('/:id/compliance/:itemId', [
   const adminEmail = req.user?.email || 'unknown';
 
   try {
+    const before = await db.query(
+      'SELECT status, notes FROM client_compliance_status WHERE client_id = $1 AND item_id = $2',
+      [req.params.id, req.params.itemId]
+    );
     const result = await db.query(
       `INSERT INTO client_compliance_status (client_id, item_id, status, notes, updated_by, updated_at)
        VALUES ($1, $2, $3, $4, $5, NOW())
@@ -129,6 +146,14 @@ router.patch('/:id/compliance/:itemId', [
        RETURNING *`,
       [req.params.id, req.params.itemId, status, notes || null, adminEmail]
     );
+    await recordAuditLog({
+      adminEmail,
+      action: 'compliance.status_update',
+      targetTable: 'client_compliance_status',
+      targetId: `${req.params.id}:${req.params.itemId}`,
+      oldValue: before.rows[0] || null,
+      newValue: { status, notes: notes || null },
+    });
     res.json({ success: true, status: result.rows[0] });
   } catch (err) {
     console.error('[adminClients] Failed to update compliance status:', err.message);
