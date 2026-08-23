@@ -1,32 +1,18 @@
+// backend/src/routes/tools.js
+// Pure Node.js tools route — no Python subprocess.
+// Replaces the old child_process.spawn('python3', ...) version.
+
 import { Router } from 'express';
-import { spawn } from 'child_process';
-import path from 'path';
 import dns from 'dns/promises';
 import { body, validationResult } from 'express-validator';
 import { requireAuth } from '../middleware/auth.js';
 import db from '../db.js';
+import { audit } from '../lib/authAudit.js';
 
 const router = Router();
 
-// Points at the real, existing tools/ directory (auth_audit.py etc.) two
-// levels up from backend/src/routes. The previous version of this route
-// spawned "scripts/login-tool.js", a script that doesn't exist anywhere in
-// the repo — every call would have failed with ENOENT. Requires `python3`
-// and the `requests` package on the host running this.
-const toolsDir = path.join(import.meta.dirname, '..', '..', '..', 'tools');
-
-// SSRF guard: isURL({require_protocol:true}) alone only confirms the value
-// *looks like* a URL — it doesn't stop it from pointing at localhost, an
-// internal service, or a cloud metadata endpoint (169.254.169.254). Since
-// this route lets an authenticated admin make the SERVER issue an
-// outbound HTTP request to an arbitrary address (via auth_audit.py) and
-// returns the result, an admin session — including one obtained through
-// session hijack, not just a malicious admin — could otherwise be used to
-// probe internal-only network segments. Confirmed live in testing:
-// target=http://127.0.0.1:<port>/api/admin/me succeeded before this guard
-// existed. Resolving DNS ourselves (rather than trusting the hostname)
-// also closes the simple version of DNS-rebinding, where a public-looking
-// hostname resolves to a private address.
+// SSRF guard: same ranges as before — prevents probing internal networks
+// via the server-side fetch.
 const BLOCKED_IPV4_RANGES = [
   ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
   ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24],
@@ -49,14 +35,14 @@ function isBlockedIPv4(ip) {
 function isBlockedIPv6(ip) {
   const lower = ip.toLowerCase();
   return (
-    lower === '::1' ||               // loopback
-    lower.startsWith('fc') ||        // fc00::/7 unique local
-    lower.startsWith('fd') ||        // fc00::/7 unique local
-    lower.startsWith('fe8') ||       // fe80::/10 link-local
+    lower === '::1' ||
+    lower.startsWith('fc') ||
+    lower.startsWith('fd') ||
+    lower.startsWith('fe8') ||
     lower.startsWith('fe9') ||
     lower.startsWith('fea') ||
     lower.startsWith('feb') ||
-    lower.startsWith('::ffff:127.') // IPv4-mapped loopback
+    lower.startsWith('::ffff:127.')
   );
 }
 
@@ -108,44 +94,29 @@ router.post(
       return res.status(400).json({ error: err.message });
     }
 
-    const args = [path.join(toolsDir, 'auth_audit.py'), target, '--json'];
-    if (loginPath) args.push('--login-path', loginPath);
+    let result;
+    try {
+      result = await audit(target, loginPath);
+    } catch (err) {
+      console.error('[tools] Audit failed:', err.message);
+      return res.status(500).json({ error: 'Audit execution failed', detail: err.message });
+    }
 
-    const child = spawn('python3', args, { cwd: toolsDir, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (result.error) {
+      return res.status(500).json({ error: result.error });
+    }
 
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    try {
+      await db.query(
+        `INSERT INTO tool_runs (tool, target, status, summary_json, result_json, run_by, created_at)
+         VALUES ($1, $2, 'completed', $3, $4, $5, NOW())`,
+        ['auth_audit', target, JSON.stringify(result.summary || {}), JSON.stringify(result), req.user?.email || null]
+      );
+    } catch (err) {
+      console.error('[tools] Failed to record run:', err.message);
+    }
 
-    child.on('error', (err) => {
-      console.error('[tools] Failed to start python3:', err.message);
-      res.status(500).json({ error: 'Failed to start tool — is python3 installed on this host?' });
-    });
-
-    child.on('close', async (code) => {
-      if (code !== 0) {
-        return res.status(500).json({ error: 'Tool execution failed', stderr: stderr.trim() });
-      }
-      let result;
-      try {
-        result = JSON.parse(stdout);
-      } catch {
-        return res.status(500).json({ error: 'Tool produced invalid output', raw: stdout.trim() });
-      }
-
-      try {
-        await db.query(
-          `INSERT INTO tool_runs (tool, target, status, summary_json, result_json, run_by, created_at)
-           VALUES ($1, $2, 'completed', $3, $4, $5, NOW())`,
-          ['auth_audit', target, JSON.stringify(result.summary || {}), JSON.stringify(result), req.user?.email || null]
-        );
-      } catch (err) {
-        console.error('[tools] Failed to record run:', err.message);
-      }
-
-      res.json({ success: true, result });
-    });
+    res.json({ success: true, result });
   }
 );
 
