@@ -15,7 +15,7 @@ import { pinoHttpMiddleware } from './middleware/pinoHttp.js';
 import { shield } from './middleware/shieldMiddleware.js';
 import { attachCspNonce, helmetMiddleware } from './middleware/helmetConfig.js';
 import { PostgresRateLimitStore } from './lib/rate-limit-store.js';
-import { blocklistToken } from './middleware/auth.js';
+import { blocklistToken, requireAuth } from './middleware/auth.js';
 import { requireClientAuth } from './middleware/clientAuth.js';          // FIX C1: was missing
 import { setCsrfCookie, verifyCsrfToken } from './middleware/csrf.js';
 import { configureTrustProxy } from './config/trusted-proxies.js';
@@ -126,7 +126,11 @@ async function startServer() {
 
   app.use((err, req, res, next) => {
     logger.error(err);
-    res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });
+    const status = err.status || 500;
+    const message = config.isProduction
+      ? 'Internal Server Error'
+      : (err.message || 'Internal Server Error');
+    res.status(status).json({ error: message });
   });
 
   // Create default admin if none exists
