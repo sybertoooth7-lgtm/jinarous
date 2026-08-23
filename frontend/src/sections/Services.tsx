@@ -162,15 +162,15 @@ export default function Services() {
         {/* Header */}
         <div className="text-center mb-16 reveal">
           <div className="inline-flex items-center px-4 py-2 rounded-full bg-alux-cyan/10 border border-alux-cyan/20 text-alux-cyan text-sm font-medium mb-4">
-            AI-Native Services
+            Standards-Based Security Services
           </div>
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-serif font-bold text-white mb-6">
-            <span className="gradient-text-cyan">Intelligent</span>{' '}
-            <span className="gradient-text-purple">Security Services</span>
+            <span className="gradient-text-cyan">Security Services</span>{' '}
+            <span className="gradient-text-purple">Grounded in Real Standards</span>
           </h2>
           <p className="text-[#94a3b8] text-lg max-w-2xl mx-auto">
-            Every service runs on dedicated neural sub-networks fine-tuned for specific security
-            domains.
+            Every engagement is mapped to a named standard — NIST, PCI DSS, Kenya DPA 2019, OWASP —
+            with a concrete deliverable, not a vague promise.
           </p>
         </div>
 
