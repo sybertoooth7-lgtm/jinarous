@@ -46,7 +46,7 @@ export default function AdminLogin() {
     }
   }
 
-  function handleMfaSuccess(data: { email: string }) {
+  function handleMfaSuccess(_data: { email: string }) {
     setMfaToken(null);
     navigate('/admin/dashboard');
   }
