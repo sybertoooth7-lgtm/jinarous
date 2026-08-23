@@ -1,45 +1,35 @@
 // backend/src/routes/health.js
-// Cached health check — prevents DB DoS from aggressive polling
-// while still surfacing actual outages within ~5 seconds.
+// Cached deep health check to prevent DB connection exhaustion.
 
 import { Router } from 'express';
-import { pool } from '../db.js'; // adjust import path to your db module
+import db from '../db.js';
 
 const router = Router();
 
-// In-memory cache: { healthy: boolean, expiresAt: number }
-let cache = { healthy: true, expiresAt: 0 };
+let cachedHealth = { status: 'ok', database: 'connected' };
+let cachedAt = 0;
 const CACHE_TTL_MS = 5000;
 
-async function checkDb() {
-  const now = Date.now();
-  if (now < cache.expiresAt) {
-    return cache.healthy;
-  }
-  try {
-    await pool.query('SELECT 1');
-    cache = { healthy: true, expiresAt: now + CACHE_TTL_MS };
-    return true;
-  } catch (err) {
-    cache = { healthy: false, expiresAt: now + CACHE_TTL_MS };
-    return false;
-  }
-}
+router.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
 
-router.get('/', async (_req, res) => {
-  const dbHealthy = await checkDb();
-  if (!dbHealthy) {
-    return res.status(503).json({
-      status: 'unhealthy',
-      db: 'down',
-      timestamp: new Date().toISOString(),
-    });
+router.get('/health/deep', async (req, res) => {
+  const now = Date.now();
+  if (now - cachedAt < CACHE_TTL_MS) {
+    return res.json(cachedHealth);
   }
-  res.json({
-    status: 'healthy',
-    db: 'up',
-    timestamp: new Date().toISOString(),
-  });
+
+  try {
+    await db.query('SELECT 1');
+    cachedHealth = { status: 'ok', database: 'connected' };
+    res.json(cachedHealth);
+  } catch (err) {
+    cachedHealth = { status: 'error', database: 'unreachable' };
+    res.status(503).json(cachedHealth);
+  } finally {
+    cachedAt = now;
+  }
 });
 
 export default router;
