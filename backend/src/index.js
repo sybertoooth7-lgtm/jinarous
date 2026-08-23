@@ -141,7 +141,10 @@ async function startServer() {
       const bootstrapPassword = config.adminBootstrapPassword;
       if (bootstrapEmail && bootstrapPassword) {
         const hashedPassword = await bcrypt.hash(bootstrapPassword, 12);
-        await db.query('INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, $3)', [bootstrapEmail, hashedPassword, 'superadmin']);
+        await db.query(
+          'INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING',
+          [bootstrapEmail, hashedPassword, 'superadmin']
+        );
         logger.info(`Default admin created: ${bootstrapEmail}`);
       } else {
         logger.warn('ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD are not set. No default admin created.');
