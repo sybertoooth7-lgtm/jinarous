@@ -13,10 +13,10 @@ import db from './db.js';
 import { logger } from './logger.js';
 import { pinoHttpMiddleware } from './middleware/pinoHttp.js';
 import { shield } from './middleware/shieldMiddleware.js';
-import { loginAudit } from './middleware/loginAudit.js';
 import { attachCspNonce, helmetMiddleware } from './middleware/helmetConfig.js';
 import { PostgresRateLimitStore } from './lib/rate-limit-store.js';
 import { blocklistToken } from './middleware/auth.js';
+import { requireClientAuth } from './middleware/clientAuth.js';          // FIX C1: was missing
 import { setCsrfCookie, verifyCsrfToken } from './middleware/csrf.js';
 import { configureTrustProxy } from './config/trusted-proxies.js';
 import { startCleanupScheduler } from './jobs/cleanup.js';
@@ -51,11 +51,13 @@ async function startServer() {
 
   app.use(pinoHttpMiddleware);
 
-  app.use(cors({ origin: config.corsOrigin, credentials: true }));
+  // FIX C3: config.corsOrigin -> config.corsOrigins (matches config.js export)
+  app.use(cors({ origin: config.corsOrigins, credentials: true }));
   app.use(attachCspNonce);
   app.use(helmetMiddleware);
   app.use(express.json({ limit: '10kb' }));
   app.use(express.urlencoded({ extended: false, limit: '10kb' }));
+  // FIX C4: config.cookieSecret is now exported from config.js
   app.use(cookieParser(config.cookieSecret));
   app.use(setCsrfCookie);
 
@@ -85,7 +87,8 @@ async function startServer() {
     },
   });
 
-  app.use(loginAudit);
+  // FIX C2: removed invalid `app.use(loginAudit);` — loginAudit.js exports
+  // logLoginAttempt/isNewIp/alertNewDevice, not a middleware function.
   app.use(verifyCsrfToken);
 
   app.use('/api', healthRoutes);
@@ -95,7 +98,8 @@ async function startServer() {
 
   // Public / readonly-safe admin routes
   app.use('/api/admin', adminRoutes);
-  app.use('/api/admin/mfa', requireAuth, adminMfaRoutes);
+  // FIX M3: removed redundant requireAuth — adminMfaRoutes already has it internally
+  app.use('/api/admin/mfa', adminMfaRoutes);
 
   // Admin-only routes (readonly blocked)
   app.use('/api/admin/security', requireAuth, requireAdmin, adminSecurityRoutes);
