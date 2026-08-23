@@ -46,16 +46,28 @@ async function cleanupBlockedIps() {
   return result.rowCount;
 }
 
+// Remove client login attempts older than 90 days
+async function cleanupLoginAttempts() {
+  const result = await db.query(
+    `DELETE FROM client_login_attempts WHERE created_at < NOW() - INTERVAL '90 days' RETURNING id`
+  );
+  if (result.rowCount > 0) {
+    logger.info(`[cleanup] Purged ${result.rowCount} old login attempts`);
+  }
+  return result.rowCount;
+}
+
 export async function runCleanup() {
   logger.info('[cleanup] Starting periodic cleanup job...');
   try {
-    const [tokens, sessions, rates, ips] = await Promise.all([
+    const [tokens, sessions, rates, ips, attempts] = await Promise.all([
       cleanupTokenBlocklist(),
       cleanupClientSessions(),
       cleanupRateLimits(),
       cleanupBlockedIps(),
+      cleanupLoginAttempts(),
     ]);
-    logger.info(`[cleanup] Complete. tokens=${tokens}, sessions=${sessions}, rateLimits=${rates}, ipBlocks=${ips}`);
+    logger.info(`[cleanup] Complete. tokens=${tokens}, sessions=${sessions}, rateLimits=${rates}, ipBlocks=${ips}, loginAttempts=${attempts}`);
   } catch (err) {
     logger.error('[cleanup] Error during cleanup:', err.message);
   }
