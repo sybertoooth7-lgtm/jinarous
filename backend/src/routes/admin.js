@@ -154,7 +154,7 @@ router.post('/mfa/verify', [
     }
 
     const { rows } = await db.query(
-      'SELECT id, email, mfa_secret, mfa_enabled, mfa_backup_codes FROM admin_users WHERE id = $1',
+      'SELECT id, email, role, mfa_secret, mfa_enabled, mfa_backup_codes FROM admin_users WHERE id = $1',
       [mfaPayload.sub]
     );
     const user = rows[0];
