@@ -46,6 +46,9 @@ const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 8 * 60 * 60 * 100
 
 /**
  * POST /api/admin/login
+ * MFA-aware: if MFA is enabled, returns an mfaToken instead of the full session.
+ * The client must POST /api/admin/mfa/verify with the mfaToken + TOTP code
+ * to receive the real adminToken cookie.
  */
 router.post('/login', [
   body('email').isEmail().normalizeEmail(),
@@ -62,8 +65,7 @@ router.post('/login', [
     const result = await db.query('SELECT * FROM admin_users WHERE email = $1', [email]);
     const user = result.rows[0];
 
-    // Account-level lockout check (before bcrypt to save CPU) — same
-    // ordering rationale as clientAuth.js.
+    // Account-level lockout check (before bcrypt to save CPU)
     if (user?.locked_until && new Date(user.locked_until) > new Date()) {
       const remainingSec = Math.ceil((new Date(user.locked_until) - new Date()) / 1000);
       return res.status(423).json({
@@ -92,12 +94,24 @@ router.post('/login', [
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Successful login — reset failure counter
+    // Successful password auth — reset failure counter
     await db.query(
       'UPDATE admin_users SET failed_login_count = 0, locked_until = NULL WHERE id = $1',
       [user.id]
     );
 
+    // === MFA CHECK ===
+    if (user.mfa_enabled && user.mfa_secret) {
+      const { generateMfaToken } = await import('../lib/mfa.js');
+      const mfaToken = generateMfaToken(user.id, user.email);
+      return res.json({
+        mfaRequired: true,
+        mfaToken,
+        message: 'MFA required. POST /api/admin/mfa/verify with this mfaToken and your TOTP code.',
+      });
+    }
+
+    // No MFA — issue full session immediately
     const jti = crypto.randomUUID();
     const token = jwt.sign(
       { sub: user.id, email: user.email, jti },
@@ -115,6 +129,88 @@ router.post('/login', [
     res.json({ success: true, email: user.email });
   } catch (err) {
     console.error('[admin] Login error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/admin/mfa/verify
+ * Step 2 of MFA login: verify TOTP code (or backup code) and issue full session.
+ */
+router.post('/mfa/verify', [
+  body('mfaToken').isString().trim().notEmpty(),
+  body('code').isString().trim().notEmpty(),
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  try {
+    const { verifyMfaToken, decryptSecret, verifyTOTP, verifyBackupCode } = await import('../lib/mfa.js');
+    const mfaPayload = verifyMfaToken(req.body.mfaToken);
+    if (!mfaPayload) {
+      return res.status(401).json({ error: 'Invalid or expired MFA token. Please log in again.' });
+    }
+
+    const { rows } = await db.query(
+      'SELECT id, email, mfa_secret, mfa_enabled, mfa_backup_codes FROM admin_users WHERE id = $1',
+      [mfaPayload.sub]
+    );
+    const user = rows[0];
+    if (!user?.mfa_enabled) {
+      return res.status(400).json({ error: 'MFA is not enabled for this account.' });
+    }
+
+    const secret = decryptSecret(user.mfa_secret);
+    let codeValid = verifyTOTP(secret, req.body.code);
+    let usedBackup = false;
+
+    // Try backup code if TOTP didn't match
+    if (!codeValid && user.mfa_backup_codes) {
+      const hashedCodes = JSON.parse(user.mfa_backup_codes);
+      const matchedIndex = await verifyBackupCode(req.body.code, hashedCodes);
+      if (matchedIndex >= 0) {
+        codeValid = true;
+        usedBackup = true;
+        // Remove used backup code
+        hashedCodes.splice(matchedIndex, 1);
+        await db.query(
+          'UPDATE admin_users SET mfa_backup_codes = $1 WHERE id = $2',
+          [JSON.stringify(hashedCodes), user.id]
+        );
+      }
+    }
+
+    if (!codeValid) {
+      // Log failed MFA attempt
+      await recordFailedLogin(req.ip);
+      return res.status(401).json({ error: 'Invalid MFA code.' });
+    }
+
+    // Issue full session
+    const jti = crypto.randomUUID();
+    const token = jwt.sign(
+      { sub: user.id, email: user.email, jti },
+      config.jwtSecret,
+      { expiresIn: config.jwtExpiresIn }
+    );
+
+    res.cookie('adminToken', token, {
+      httpOnly: true,
+      secure: config.isProduction,
+      sameSite: 'strict',
+      maxAge: COOKIE_MAX_AGE_MS,
+    });
+
+    res.json({
+      success: true,
+      email: user.email,
+      usedBackupCode: usedBackup,
+      warning: usedBackup ? 'You used a backup code. Consider regenerating them from your settings.' : undefined,
+    });
+  } catch (err) {
+    console.error('[admin] MFA verify error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
