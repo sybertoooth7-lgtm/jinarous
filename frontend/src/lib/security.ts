@@ -7,7 +7,7 @@ import { API_BASE } from './api';
 
 /**
  * Fetch wrapper that automatically attaches:
- * - CSRF token from cookie header
+ * - CSRF token from cookie header (only for state-changing methods)
  * - Standard browser headers that bots often omit
  * - credentials: 'include' for cookie-based auth
  */
@@ -17,11 +17,14 @@ export async function secureFetch(
 ): Promise<Response> {
   const url = `${API_BASE}${path}`;
   const headers = new Headers(options.headers || {});
+  const method = (options.method || 'GET').toUpperCase();
 
-  // CSRF token from cookie (set by server middleware)
-  const csrfMatch = document.cookie.match(/csrfToken=([^;]+)/);
-  if (csrfMatch) {
-    headers.set('x-csrf-token', csrfMatch[1]);
+  // CSRF token from cookie (set by server middleware) — only for state-changing methods
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const csrfMatch = document.cookie.match(/csrfToken=([^;]+)/);
+    if (csrfMatch) {
+      headers.set('x-csrf-token', csrfMatch[1]);
+    }
   }
 
   // Standard browser headers
