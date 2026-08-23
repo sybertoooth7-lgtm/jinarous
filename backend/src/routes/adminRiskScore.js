@@ -6,6 +6,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { param, body, validationResult } from 'express-validator';
 import db from '../db.js';
+import { recordAuditLog } from '../middleware/auditLog.js';
 
 const router = Router({ mergeParams: true }); // mergeParams to access :id from the parent mount
 
@@ -35,6 +36,17 @@ router.post('/', [
        RETURNING id, token, created_at, expires_at`,
       [req.params.id, token, expiresAt, adminEmail]
     );
+    // NOTE: token intentionally excluded from newValue — it's
+    // bearer-equivalent (anyone holding it gets the share), same
+    // reasoning as never logging passwords in plaintext.
+    await recordAuditLog({
+      adminEmail,
+      action: 'risk_score_share.create',
+      targetTable: 'risk_score_shares',
+      targetId: result.rows[0].id,
+      oldValue: null,
+      newValue: { client_id: req.params.id, expires_at: expiresAt },
+    });
     res.status(201).json({ share: result.rows[0] });
   } catch (err) {
     console.error('[adminRiskScore] Failed to create share link:', err.message);
@@ -88,6 +100,14 @@ router.post('/:shareId/revoke', [
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Share link not found.' });
     }
+    await recordAuditLog({
+      adminEmail: req.user?.email || 'unknown',
+      action: 'risk_score_share.revoke',
+      targetTable: 'risk_score_shares',
+      targetId: req.params.shareId,
+      oldValue: { revoked: false },
+      newValue: { revoked: true },
+    });
     res.json({ success: true });
   } catch (err) {
     console.error('[adminRiskScore] Failed to revoke share link:', err.message);
