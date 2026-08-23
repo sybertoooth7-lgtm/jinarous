@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import { attachCspNonce, helmetMiddleware } from './middleware/helmetConfig.js';
 import cluster from 'cluster';
 import os from 'os';
 import bcrypt from 'bcryptjs';
@@ -33,20 +33,24 @@ import { setCsrfCookie, verifyCsrfToken } from './middleware/csrf.js';
 async function startServer() {
   const app = express();
 
+  // Railway's edge is typically 1 hop and strips/normalizes X-Forwarded-For
+  // at their proxy — confirmed via Railway support docs, Aug 2026. If you
+  // ever add Cloudflare or another proxy in front of Railway, re-verify and
+  // likely bump this to 2.
   app.set('trust proxy', 1);
 
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:'],
-        objectSrc: ["'none'"],
-        frameAncestors: ["'none'"],
-      },
-    },
-  }));
+  // attachCspNonce must run BEFORE helmetMiddleware — helmet's scriptSrc/
+  // styleSrc directives read res.locals.cspNonce when building the CSP
+  // header for this response, so the nonce has to exist first.
+  //
+  // Replaces the old inline helmet() config below, which allowed
+  // 'unsafe-inline' for styles and had no HSTS. This stricter config lived
+  // in helmetConfig.js unused since it was added — checked backend/public/
+  // admin/index.html first: no inline <style> tags or style= attributes,
+  // and its one script is an external file (dashboard.js), so nonces don't
+  // break anything currently served.
+  app.use(attachCspNonce);
+  app.use(helmetMiddleware);
 
   const allowedOrigins = config.corsOrigins.length > 0
     ? config.corsOrigins
