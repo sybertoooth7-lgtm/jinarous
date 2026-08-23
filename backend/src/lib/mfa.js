@@ -2,6 +2,7 @@
 // TOTP MFA using only Node.js built-in crypto.
 
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';  // FIX C5: ESM import, not require()
 import { config } from '../config.js';
 
 const SECRET_LENGTH = 20;
@@ -115,7 +116,6 @@ export async function verifyBackupCode(code, hashedCodes) {
 }
 
 export function generateMfaToken(userId, email) {
-  const jwt = require('jsonwebtoken');
   return jwt.sign(
     { sub: userId, email, type: 'mfa_challenge' },
     config.jwtSecret,
@@ -124,7 +124,6 @@ export function generateMfaToken(userId, email) {
 }
 
 export function verifyMfaToken(token) {
-  const jwt = require('jsonwebtoken');
   try {
     const decoded = jwt.verify(token, config.jwtSecret);
     if (decoded.type !== 'mfa_challenge') return null;
