@@ -1,35 +1,46 @@
 // backend/src/routes/health.js
-// Cached deep health check to prevent DB connection exhaustion.
+// Cached health check — prevents DB DoS from aggressive polling
+// while still surfacing actual outages within ~5 seconds.
 
 import { Router } from 'express';
-import db from '../db.js';
+import db from '../db.js'; // FIX C8: db exports a query() method, not pool
 
 const router = Router();
 
-let cachedHealth = { status: 'ok', database: 'connected' };
-let cachedAt = 0;
+// In-memory cache: { healthy: boolean, expiresAt: number }
+let cache = { healthy: true, expiresAt: 0 };
 const CACHE_TTL_MS = 5000;
 
-router.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
-
-router.get('/health/deep', async (req, res) => {
+async function checkDb() {
   const now = Date.now();
-  if (now - cachedAt < CACHE_TTL_MS) {
-    return res.json(cachedHealth);
+  if (now < cache.expiresAt) {
+    return cache.healthy;
   }
-
   try {
     await db.query('SELECT 1');
-    cachedHealth = { status: 'ok', database: 'connected' };
-    res.json(cachedHealth);
+    cache = { healthy: true, expiresAt: now + CACHE_TTL_MS };
+    return true;
   } catch (err) {
-    cachedHealth = { status: 'error', database: 'unreachable' };
-    res.status(503).json(cachedHealth);
-  } finally {
-    cachedAt = now;
+    cache = { healthy: false, expiresAt: now + CACHE_TTL_MS };
+    return false;
   }
+}
+
+// FIX C9: use /health path so mounting at /api gives /api/health
+router.get('/health', async (_req, res) => {
+  const dbHealthy = await checkDb();
+  if (!dbHealthy) {
+    return res.status(503).json({
+      status: 'unhealthy',
+      db: 'down',
+      timestamp: new Date().toISOString(),
+    });
+  }
+  res.json({
+    status: 'healthy',
+    db: 'up',
+    timestamp: new Date().toISOString(),
+  });
 });
 
 export default router;
