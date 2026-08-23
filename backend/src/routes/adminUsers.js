@@ -65,6 +65,13 @@ router.patch('/:id/role', requireAuth, requireSuperAdmin, [
     const before = await db.query('SELECT role FROM admin_users WHERE id = $1', [targetId]);
     if (before.rows.length === 0) return res.status(404).json({ error: 'Admin not found.' });
 
+    if (before.rows[0].role === 'superadmin' && req.body.role !== 'superadmin') {
+      const { rows: superadmins } = await db.query("SELECT COUNT(*) FROM admin_users WHERE role = 'superadmin'");
+      if (parseInt(superadmins[0].count, 10) <= 1) {
+        return res.status(409).json({ error: 'Cannot demote the last remaining superadmin.' });
+      }
+    }
+
     const result = await db.query('UPDATE admin_users SET role = $1 WHERE id = $2 RETURNING id, email, role', [req.body.role, targetId]);
 
     await recordAuditLog({
@@ -90,6 +97,16 @@ router.delete('/:id', requireAuth, requireSuperAdmin, [
   if (targetId === req.user.sub) return res.status(403).json({ error: 'You cannot delete your own account.' });
 
   try {
+    const target = await db.query('SELECT role FROM admin_users WHERE id = $1', [targetId]);
+    if (target.rows.length === 0) return res.status(404).json({ error: 'Admin not found.' });
+
+    if (target.rows[0].role === 'superadmin') {
+      const { rows: superadmins } = await db.query("SELECT COUNT(*) FROM admin_users WHERE role = 'superadmin'");
+      if (parseInt(superadmins[0].count, 10) <= 1) {
+        return res.status(409).json({ error: 'Cannot delete the last remaining superadmin.' });
+      }
+    }
+
     const result = await db.query('DELETE FROM admin_users WHERE id = $1 RETURNING id, email, role', [targetId]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'Admin not found.' });
 
