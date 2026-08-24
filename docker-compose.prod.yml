@@ -4,16 +4,15 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "4000:4000"
+      - "3001:3001"
     environment:
       - NODE_ENV=production
-      - PORT=4000
+      - PORT=3001
       - DATABASE_URL=postgresql://alux:${DB_PASSWORD}@postgres:5432/alux_plaza
       - DB_SSL=false
       - CORS_ORIGIN=${CORS_ORIGIN}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRES_IN=8h
-      - CLUSTER_MODE=true
       - CONTACT_RATE_LIMIT_WINDOW_MINUTES=15
       - CONTACT_RATE_LIMIT_MAX=5
       - RESEND_API_KEY=${RESEND_API_KEY}
