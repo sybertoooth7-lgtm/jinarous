@@ -66,7 +66,10 @@ export async function shield(req, res, next) {
 
     next();
   } catch (err) {
-    console.error('[shield] error, allowing request through:', err.message);
-    next();
+    // Fail CLOSED: a broken shield should not silently pass every request
+    // through uninspected. A 503 is loud and temporary; a silent bypass
+    // is neither.
+    console.error('[shield] error, blocking request (fail closed):', err.message);
+    return res.status(503).json({ error: 'Security check unavailable. Please try again.' });
   }
 }
