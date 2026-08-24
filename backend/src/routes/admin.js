@@ -66,11 +66,12 @@ router.post('/login', [
     const result = await db.query('SELECT * FROM admin_users WHERE email = $1', [email]);
     const user = result.rows[0];
 
-    // FIX C7: ALWAYS run bcrypt.compare to keep timing constant, regardless of
-    // whether the email exists or the account is locked.
+    // === TIMING-SAFE: Always run bcrypt first ===
+    // This keeps response timing constant regardless of whether the email
+    // exists or the account is locked, preventing user enumeration.
     const passwordMatches = await bcrypt.compare(password, user?.password_hash || DUMMY_HASH);
 
-    // Now that bcrypt is done, check lockout.
+    // NOW check lockout (after bcrypt, so timing is constant)
     if (user?.locked_until && new Date(user.locked_until) > new Date()) {
       const remainingSec = Math.ceil((new Date(user.locked_until) - new Date()) / 1000);
       return res.status(423).json({
@@ -308,10 +309,11 @@ router.get('/submissions', requireAuth, [
 
 /**
  * PATCH /api/admin/submissions/:id/status
+ * Admin-only mutation
  */
 router.patch('/submissions/:id/status', requireAuth, requireAdmin, [
   param('id').isInt().withMessage('Invalid submission id.'),
-  body('status').isIn(VALID_STATUSES),
+  body('status').isIn(VALID_STATUSES).withMessage('Invalid status value.'),
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -344,6 +346,7 @@ router.patch('/submissions/:id/status', requireAuth, requireAdmin, [
 
 /**
  * DELETE /api/admin/submissions/:id
+ * Admin-only mutation
  */
 router.delete('/submissions/:id', requireAuth, requireAdmin, [
   param('id').isInt().withMessage('Invalid submission id.'),
