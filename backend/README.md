@@ -49,13 +49,8 @@ npm start        # production
 npm run dev      # auto-restarts on file changes
 ```
 
-The API is live at `http://localhost:4000`; admin dashboard at
-`http://localhost:4000/admin`.
-
-`CLUSTER_MODE=true` forks one worker per CPU — leave it off unless you
-have provisioned the connections for it (each worker opens its own
-Postgres pool). Note that Shield's request-volume counter is in-memory
-per process, so cluster mode also weakens volume-based blocking.
+The API is live at `http://localhost:3001`; admin dashboard at
+`http://localhost:3001/admin`.
 
 ## Tests
 
@@ -75,18 +70,30 @@ auto-deploys the commit. The service is defined by the root-level
 `render.yaml` blueprint; full walkthrough (including the free Neon
 Postgres setup) is in [RENDER_SETUP.md](../RENDER_SETUP.md).
 
+### Railway
+
+`backend/railway.json` pins the build (Dockerfile), start command
+(`node src/index.js`), and healthcheck path (`/api/health`) so Railway
+doesn't have to guess. One thing that file can't set for you: Railway's
+**Root Directory** must be pointed at `backend` in the service settings
+dashboard, or it won't find this config, the `Dockerfile`, or
+`package.json` at all. Set your service variables from
+`backend/.env.example` — `JWT_SECRET` and `DATABASE_URL` at minimum.
+
 Migrations apply themselves on every boot (`src/db.js`), and the first
 admin account can be created without shell access by setting
 `ADMIN_BOOTSTRAP_EMAIL` + `ADMIN_BOOTSTRAP_PASSWORD` before booting —
 the bootstrap fires only while `admin_users` is empty, so remove both
-vars after the first login.
+vars after the first login (in production the server refuses to start
+while they linger once an admin already exists).
 
 ## Security notes
 
 - Passwords bcrypt-hashed (12 rounds); plaintext never stored.
-- Sessions are stateless JWTs (default expiry 8h) delivered as
-  httpOnly cookies; separate cookies for admins (`token`) and clients
-  (`clientToken`). Per-account lockout on repeated failures for both.
+- Sessions are stateless JWTs (default expiry 2h, configurable via
+  `JWT_EXPIRES_IN`) delivered as httpOnly cookies; separate cookies for
+  admins (`token`) and clients (`clientToken`). Per-account lockout on
+  repeated failures for both.
 - CSRF double-submit cookie enforced globally on non-GET requests.
 - Contact endpoint rate-limited (default 5 / 15 min / IP) plus hidden
   honeypot field; login endpoints have their own stricter limiter.
