@@ -22,6 +22,7 @@ router.post(
     body('company').optional({ checkFalsy: true }).trim().isLength({ max: 150 }),
     body('message').trim().notEmpty().isLength({ max: 5000 }),
     body('honeypot').optional({ checkFalsy: true }).trim(),
+    body('website_url').optional({ checkFalsy: true }).trim(),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -31,7 +32,8 @@ router.post(
 
     recordContactAttempt();
 
-    if (req.body.honeypot) {
+    // Honeypot checks: silent success to avoid leaking detection logic to bots
+    if (req.body.honeypot || (req.body.website_url && req.body.website_url.trim().length > 0)) {
       recordHoneypotBlocked();
       return res.status(200).json({ success: true });
     }
