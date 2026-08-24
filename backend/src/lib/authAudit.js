@@ -72,23 +72,45 @@ export async function runAuthAudit(target, loginPath = null) {
     url.pathname = loginPath.startsWith('/') ? loginPath : '/' + loginPath;
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-
+  // redirect: 'follow' would let a server redirect us to a private/internal
+  // address AFTER assertPublicTarget() already cleared the original URL —
+  // classic SSRF-via-redirect. Instead we follow redirects manually, one hop
+  // at a time, and re-run assertPublicTarget() on every Location header
+  // before fetching it.
+  const MAX_REDIRECTS = 5;
+  let currentUrl = url;
   let resp;
-  try {
-    resp = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'AluxPlaza-SecurityAudit/1.0',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-      },
-      signal: controller.signal,
-      redirect: 'follow',
-    });
-  } finally {
-    clearTimeout(timeout);
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      resp = await fetch(currentUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'AluxPlaza-SecurityAudit/1.0',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        signal: controller.signal,
+        redirect: 'manual',
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const isRedirect = resp.status >= 300 && resp.status < 400 && resp.headers.has('location');
+    if (!isRedirect) break;
+    if (hop === MAX_REDIRECTS) {
+      throw new Error('Too many redirects while auditing target.');
+    }
+
+    const nextUrl = new URL(resp.headers.get('location'), currentUrl);
+    await assertPublicTarget(nextUrl.toString());
+    currentUrl = nextUrl;
   }
+
+  url.href = currentUrl.href;
 
   const body = await resp.text();
   const headers = Object.fromEntries(resp.headers.entries());
