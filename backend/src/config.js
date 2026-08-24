@@ -7,29 +7,24 @@ const isProduction = process.env.NODE_ENV === 'production';
 const warnings = [];
 
 // JWT Secret validation
+// No dev fallback secret: a hardcoded 'dev-secret-change-me' is a real risk
+// if NODE_ENV is ever accidentally unset on a deployed container, since the
+// app would boot silently with a publicly-known secret. Always require a
+// real value, in every environment.
 const jwtSecret = process.env.JWT_SECRET;
 if (!jwtSecret) {
-  if (isProduction) {
-    throw new Error('JWT_SECRET is required in production');
-  }
-  warnings.push('JWT_SECRET is not set. Using a default secret for development only.');
+  throw new Error('JWT_SECRET is required (set it in your .env for local development too).');
 }
-if (jwtSecret && jwtSecret.length < 32) {
+if (jwtSecret.length < 32) {
   warnings.push('JWT_SECRET is too short. It should be at least 32 characters for security.');
 }
-if (jwtSecret && (jwtSecret === 'your-64-char-random-secret-here-change-me' || jwtSecret === 'secret')) {
+if (jwtSecret === 'your-64-char-random-secret-here-change-me' || jwtSecret === 'secret') {
   warnings.push('JWT_SECRET appears to be a default value. Please change it to a random string.');
 }
 
 // Cookie Secret validation
 const cookieSecret = process.env.COOKIE_SECRET || jwtSecret;
-if (!cookieSecret) {
-  if (isProduction) {
-    throw new Error('COOKIE_SECRET is required in production');
-  }
-  warnings.push('COOKIE_SECRET is not set. Using JWT_SECRET as fallback for development only.');
-}
-if (cookieSecret && cookieSecret.length < 32) {
+if (cookieSecret.length < 32) {
   warnings.push('COOKIE_SECRET is too short. It should be at least 32 characters for security.');
 }
 
@@ -60,9 +55,9 @@ if (warnings.length > 0) {
 export const config = {
   port: parseInt(process.env.PORT || '3001', 10),
   isProduction,
-  jwtSecret: jwtSecret || 'dev-secret-change-me',
+  jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '2h',
-  cookieSecret: cookieSecret || 'dev-cookie-secret-change-me',
+  cookieSecret,
   corsOrigin: corsOrigins,
   adminBootstrapEmail: process.env.ADMIN_BOOTSTRAP_EMAIL,
   adminBootstrapPassword: process.env.ADMIN_BOOTSTRAP_PASSWORD,
