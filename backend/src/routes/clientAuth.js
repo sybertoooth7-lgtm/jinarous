@@ -6,43 +6,21 @@ import crypto from 'crypto';
 import { body, validationResult } from 'express-validator';
 import db from '../db.js';
 import { config } from '../config.js';
-import { requireClientAuth, blocklistClientToken } from '../middleware/clientAuth.js';
-import {
-  logLoginAttempt,
-  isNewIp,
-  alertNewDevice,
-  DUMMY_HASH,
-} from '../middleware/loginAudit.js';
 import { recordFailedLogin } from '../shield/bruteForceGuard.js';
+import { logLoginAttempt, isNewIp, alertNewDevice } from '../middleware/loginAudit.js';
 
 const router = Router();
+const COOKIE_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+const DUMMY_HASH = '$2a$12$abcdefghijklmnopqrstuvwxycdefghijklmnopqrstu';
 
-function parseExpiryToMs(value, fallbackMs) {
-  if (!value) return fallbackMs;
-  const match = String(value).trim().match(/^(\d+)\s*(ms|s|m|h|d)?$/i);
-  if (!match) return fallbackMs;
-  const amount = Number(match[1]);
-  const unit = (match[2] || 's').toLowerCase();
-  const multipliers = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
-  return amount * (multipliers[unit] || 1000);
+function computeLockoutMinutes(count) {
+  if (count <= 3) return 0;
+  if (count <= 5) return 15;
+  if (count <= 7) return 30;
+  if (count <= 9) return 60;
+  return 360; // 6 hours cap
 }
 
-const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 8 * 60 * 60 * 1000);
-
-// Account lockout config
-const MAX_FAILED_ATTEMPTS = 5;
-const BASE_LOCKOUT_MINUTES = 15;
-const MAX_LOCKOUT_MINUTES = 360; // 6 hours
-
-function computeLockoutMinutes(failedCount) {
-  if (failedCount < MAX_FAILED_ATTEMPTS) return 0;
-  const minutes = BASE_LOCKOUT_MINUTES * Math.pow(2, failedCount - MAX_FAILED_ATTEMPTS);
-  return Math.min(minutes, MAX_LOCKOUT_MINUTES);
-}
-
-/**
- * POST /api/client/login
- */
 router.post('/login', [
   body('email').isEmail().normalizeEmail(),
   body('password').isString().trim().notEmpty(),
@@ -54,7 +32,7 @@ router.post('/login', [
 
   const { email, password } = req.body;
 
-  // Honeypot check
+  // Server-side honeypot check (bots bypassing frontend)
   if (req.body.website_url && req.body.website_url.trim().length > 0) {
     return res.status(400).json({ error: 'Invalid request' });
   }
@@ -91,7 +69,7 @@ router.post('/login', [
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Success path continues unchanged...
+    // Successful login
     await db.query('UPDATE clients SET failed_login_count = 0, locked_until = NULL WHERE id = $1', [client.id]);
     const newDevice = await isNewIp(client.id, req.ip);
     await logLoginAttempt({ clientId: client.id, email, ip: req.ip, success: true, userAgent: req.headers['user-agent'] });
@@ -100,12 +78,25 @@ router.post('/login', [
     }
 
     const jti = crypto.randomUUID();
-    const token = jwt.sign({ sub: client.id, email: client.email, role: 'client', jti }, config.jwtSecret, { expiresIn: config.jwtExpiresIn });
+    const token = jwt.sign(
+      { sub: client.id, email: client.email, role: 'client', jti },
+      config.jwtSecret,
+      { expiresIn: config.jwtExpiresIn }
+    );
+
     await db.query(
-      `INSERT INTO client_sessions (client_id, jti, ip_address, user_agent, expires_at) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (jti) DO NOTHING`,
+      `INSERT INTO client_sessions (client_id, jti, ip_address, user_agent, expires_at)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (jti) DO NOTHING`,
       [client.id, jti, req.ip, req.headers['user-agent'] || null, new Date(Date.now() + COOKIE_MAX_AGE_MS)]
     );
-    res.cookie('clientToken', token, { httpOnly: true, secure: config.isProduction, sameSite: 'strict', maxAge: COOKIE_MAX_AGE_MS });
+
+    res.cookie('clientToken', token, {
+      httpOnly: true,
+      secure: config.isProduction,
+      sameSite: 'strict',
+      maxAge: COOKIE_MAX_AGE_MS,
+    });
+
     res.json({ success: true, email: client.email, companyName: client.company_name, newDeviceAlert: newDevice });
   } catch (err) {
     console.error('[clientAuth] Login error:', err);
@@ -113,39 +104,23 @@ router.post('/login', [
   }
 });
 
-/**
- * POST /api/client/logout
- */
-router.post('/logout', requireClientAuth, async (req, res) => {
-  if (req.client?.jti) {
-    const expiresAt = req.client.exp
-      ? new Date(req.client.exp * 1000)
-      : new Date(Date.now() + COOKIE_MAX_AGE_MS);
-    await blocklistClientToken(req.client.jti, expiresAt);
-    await db.query('DELETE FROM client_sessions WHERE jti = $1', [req.client.jti]);
-  }
-  res.clearCookie('clientToken');
-  res.json({ success: true });
-});
-
-/**
- * GET /api/client/me
- */
-router.get('/me', requireClientAuth, async (req, res) => {
+router.post('/logout', async (req, res) => {
+  const token = req.cookies?.clientToken;
+  if (!token) return res.json({ success: true });
   try {
-    const result = await db.query(
-      'SELECT id, company_name, email, created_at FROM clients WHERE id = $1',
-      [req.client.sub]
-    );
-    const client = result.rows[0];
-    if (!client) {
-      return res.status(404).json({ error: 'Client not found' });
+    const decoded = jwt.verify(token, config.jwtSecret);
+    if (decoded.jti) {
+      await db.query(
+        `INSERT INTO token_blocklist (jti, expires_at) VALUES ($1, $2) ON CONFLICT (jti) DO NOTHING`,
+        [decoded.jti, new Date(Date.now() + COOKIE_MAX_AGE_MS)]
+      );
+      await db.query('DELETE FROM client_sessions WHERE jti = $1', [decoded.jti]);
     }
-    res.json({ client });
-  } catch (err) {
-    console.error('[clientAuth] /me error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+  } catch {
+    // ignore invalid token on logout
   }
+  res.clearCookie('clientToken', { httpOnly: true, secure: config.isProduction, sameSite: 'strict' });
+  res.json({ success: true });
 });
 
 export default router;
