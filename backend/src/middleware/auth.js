@@ -19,7 +19,12 @@ export async function blocklistToken(jti, expiresAt) {
 async function isBlocklisted(jti) {
   if (!jti) return false;
   try {
-    const result = await db.query('SELECT 1 FROM token_blocklist WHERE jti = $1', [jti]);
+    // Also filter by expires_at so a blocklisted jti stops counting once the
+    // underlying token would have expired anyway (matches clientAuth.js).
+    const result = await db.query(
+      'SELECT 1 FROM token_blocklist WHERE jti = $1 AND expires_at > NOW()',
+      [jti]
+    );
     return result.rows.length > 0;
   } catch (err) {
     console.error('[auth] Blocklist check failed:', err.message);
