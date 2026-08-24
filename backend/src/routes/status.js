@@ -1,35 +1,40 @@
+// backend/src/routes/status.js
 import { Router } from 'express';
-import {
-  getUptimeSeconds,
-  getAverageLatencyMs,
-  getRequestsPerSecond,
-  getPersistedTotals,
-} from '../stats.js';
+import { stats } from '../stats.js';
 
 const router = Router();
 
-// Intentionally public/unauthenticated: this powers the "live system status"
-// section on the public marketing site, viewed by anonymous visitors who
-// have no admin token. None of these fields are sensitive — aggregate
-// request/error counts, latency, and uptime, nothing user-identifying.
-router.get('/defense-matrix', async (req, res) => {
-  // Cumulative counters come from the database so the number reflects the
-  // whole cluster's traffic, not just whichever worker happened to handle
-  // this request. Latency/throughput stay per-instance since they describe
-  // this process's current load, not a historical total.
-  const totals = await getPersistedTotals();
-  const contactSuccessRate = totals.contactAttempts > 0
-    ? (totals.contactSuccesses / totals.contactAttempts) * 100
-    : null;
+function getUptimeSeconds() {
+  return Math.floor((Date.now() - stats.serverStartTime) / 1000);
+}
 
+function getRequestsPerSecond() {
+  const elapsed = (Date.now() - stats.serverStartTime) / 1000;
+  return elapsed > 0 ? (stats.requestCount / elapsed).toFixed(2) : 0;
+}
+
+function getAverageLatencyMs() {
+  if (stats.latencies.length === 0) return 0;
+  const sum = stats.latencies.reduce((a, b) => a + b, 0);
+  return (sum / stats.latencies.length).toFixed(2);
+}
+
+function getAutoResponseRate() {
+  if (stats.requestCount === 0) return 0;
+  return ((stats.autoResponses / stats.requestCount) * 100).toFixed(2);
+}
+
+router.get('/', (req, res) => {
   res.json({
-    requestCount: totals.requestCount,
-    errorCount: totals.errorCount,
-    averageLatencyMs: getAverageLatencyMs(),
+    status: 'ok',
+    uptime: getUptimeSeconds(),
     requestsPerSecond: getRequestsPerSecond(),
-    uptimeSeconds: getUptimeSeconds(),
-    contactSuccessRate,
-    honeypotBlocked: totals.honeypotBlocked,
+    averageLatencyMs: getAverageLatencyMs(),
+    totalRequests: stats.requestCount,
+    totalErrors: stats.errorCount,
+    autoResponseRate: getAutoResponseRate(),
+    honeypotBlocked: stats.honeypotBlocked,
+    serverStartTime: stats.serverStartTime,
   });
 });
 
