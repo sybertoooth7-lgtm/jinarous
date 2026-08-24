@@ -174,6 +174,13 @@ jobs:
 
       - name: Boot the server and smoke-test the API
         working-directory: backend
+        # config.js defaults PORT to 3001 — pin it explicitly here so this
+        # step doesn't silently depend on that default staying put. All
+        # curls below now target :3001 to match (was previously :4000,
+        # inconsistent with config.js, the Dockerfile healthcheck, and
+        # docker-compose.yml, all of which use 3001).
+        env:
+          PORT: "3001"
         run: |
           cp .env.example .env
           # .env.example ships NODE_ENV=production as a reminder for real
@@ -190,7 +197,7 @@ jobs:
           # wasn't ready yet) — poll /api/health instead of guessing a fixed
           # delay.
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:4000/api/health > /dev/null 2>&1; then
+            if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
               echo "Server is up after ${i} attempt(s)"
               break
             fi
@@ -201,14 +208,14 @@ jobs:
             sleep 0.5
           done
 
-          curl -sf http://localhost:4000/api/health/deep
-          curl -sf http://localhost:4000/api/status/defense-matrix
+          curl -sf http://localhost:3001/api/health/deep
+          curl -sf http://localhost:3001/api/status/defense-matrix
 
           # CSRF is enforced globally on all non-GET requests — a real GET
           # first is required to receive the csrfToken cookie.
-          curl -sf -c cookies.txt http://localhost:4000/api/health > /dev/null
+          curl -sf -c cookies.txt http://localhost:3001/api/health > /dev/null
           CSRF=$(grep csrfToken cookies.txt | awk '{print $7}')
-          curl -sf -b cookies.txt -X POST http://localhost:4000/api/contact \
+          curl -sf -b cookies.txt -X POST http://localhost:3001/api/contact \
             -H "Content-Type: application/json" \
             -H "x-csrf-token: $CSRF" \
             -d '{"name":"CI Integration Test","email":"ci-integration@example.com","message":"real end-to-end contact submission"}'
@@ -281,6 +288,10 @@ jobs:
 
       - name: Start server in background
         working-directory: backend
+        # Same reason as the integration-tests job: curls below now target
+        # :3001, matching config.js's default (was inconsistently :4000).
+        env:
+          PORT: "3001"
         run: |
           cp .env.example .env
           # .env.example ships NODE_ENV=production — left as-is here, cookies
@@ -289,22 +300,18 @@ jobs:
           # below (admin login, pagination, XSS, path validation).
           sed -i "s/NODE_ENV=production/NODE_ENV=development/" .env
           sed -i "s/your-64-char-random-secret-here-change-me/$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")/" .env
-          # Force single-process mode for this job. Shield's request-volume
-          # counter (bruteForceGuard.js) is deliberately in-memory per
-          # process — under cluster mode every worker keeps its OWN Map, so
-          # 105 test requests split across 4 workers ≈ 26 per worker, far
-          # below the 100-request block threshold, and the rate-limiting
-          # test below fails deterministically. Production runs
-          # CLUSTER_MODE=false (see .env.railway), so testing against a
-          # single process is also what actually matches deployment.
-          sed -i "s/^CLUSTER_MODE=.*/CLUSTER_MODE=false/" .env
+          # NOTE: CLUSTER_MODE was never actually implemented (no
+          # cluster.fork() anywhere in backend/src — it only ever appeared
+          # in comments describing a hypothetical). Shield's request-volume
+          # counter (bruteForceGuard.js) is in-memory per single process
+          # either way, which is what this job actually tests against.
 
           node src/index.js &
 
           # Flaked before on a hard-coded `sleep 3` — poll /api/health
           # instead of guessing a fixed startup delay.
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:4000/api/health > /dev/null 2>&1; then
+            if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
               echo "Server is up after ${i} attempt(s)"
               break
             fi
@@ -318,9 +325,9 @@ jobs:
           # Seed a session for the tests below: a real GET for the CSRF
           # cookie, then an authenticated admin login. Several endpoints
           # under test require both.
-          curl -sf -c cookies.txt http://localhost:4000/api/health > /dev/null
+          curl -sf -c cookies.txt http://localhost:3001/api/health > /dev/null
           CSRF=$(grep csrfToken cookies.txt | awk '{print $7}')
-          curl -sf -b cookies.txt -c cookies.txt -X POST http://localhost:4000/api/admin/login \
+          curl -sf -b cookies.txt -c cookies.txt -X POST http://localhost:3001/api/admin/login \
             -H "Content-Type: application/json" \
             -H "x-csrf-token: $CSRF" \
             -d '{"email":"ci-admin@example.com","password":"CiTestPassw0rd!"}'
@@ -329,10 +336,10 @@ jobs:
       - name: Timing attack resistance
         run: |
           echo "Testing timing attack resistance..."
-          TIME_VALID=$(curl -s -w "%{time_total}" -o /dev/null -X POST http://localhost:4000/api/admin/login \
+          TIME_VALID=$(curl -s -w "%{time_total}" -o /dev/null -X POST http://localhost:3001/api/admin/login \
             -H "Content-Type: application/json" \
             -d '{"email":"ci-admin@example.com","password":"wrongpass"}')
-          TIME_INVALID=$(curl -s -w "%{time_total}" -o /dev/null -X POST http://localhost:4000/api/admin/login \
+          TIME_INVALID=$(curl -s -w "%{time_total}" -o /dev/null -X POST http://localhost:3001/api/admin/login \
             -H "Content-Type: application/json" \
             -d '{"email":"nonexistent@example.com","password":"wrongpass"}')
           echo "Existing user (wrong pass): ${TIME_VALID}s"
@@ -352,7 +359,7 @@ jobs:
         run: |
           echo "Testing pagination and filtering..."
           CSRF=$(cat /tmp/csrf.txt)
-          RESPONSE=$(curl -s -b cookies.txt "http://localhost:4000/api/admin/submissions?page=1&limit=5&status=new")
+          RESPONSE=$(curl -s -b cookies.txt "http://localhost:3001/api/admin/submissions?page=1&limit=5&status=new")
           if ! echo "$RESPONSE" | grep -q '"total":'; then
             echo "Response missing flat 'total' field: $RESPONSE"
             exit 1
@@ -373,11 +380,11 @@ jobs:
         run: |
           echo "Testing company field storage..."
           CSRF=$(cat /tmp/csrf.txt)
-          curl -sf -b cookies.txt -X POST http://localhost:4000/api/contact \
+          curl -sf -b cookies.txt -X POST http://localhost:3001/api/contact \
             -H "Content-Type: application/json" \
             -H "x-csrf-token: $CSRF" \
             -d '{"name":"Test","email":"test@example.com","company":"Acme Corp","message":"Hello"}' > /dev/null
-          RESPONSE=$(curl -s -b cookies.txt "http://localhost:4000/api/admin/submissions?search=Acme")
+          RESPONSE=$(curl -s -b cookies.txt "http://localhost:3001/api/admin/submissions?search=Acme")
           if ! echo "$RESPONSE" | grep -q "Acme Corp"; then
             echo "Company field not stored or returned: $RESPONSE"
             exit 1
@@ -397,7 +404,7 @@ jobs:
           # Shield never lets it reach storage at all.
           echo "Testing that an XSS payload is blocked outright..."
           CSRF=$(cat /tmp/csrf.txt)
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -b cookies.txt -X POST http://localhost:4000/api/contact \
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -b cookies.txt -X POST http://localhost:3001/api/contact \
             -H "Content-Type: application/json" \
             -H "x-csrf-token: $CSRF" \
             -d '{"name":"<script>alert(1)</script>","email":"xss@test.com","message":"m"}')
@@ -429,7 +436,7 @@ jobs:
           # depends on which defensive layer catches it first.
           echo "Testing path validation..."
           CSRF=$(cat /tmp/csrf.txt)
-          RESPONSE=$(curl -s -b cookies.txt -X POST http://localhost:4000/api/tools/run \
+          RESPONSE=$(curl -s -b cookies.txt -X POST http://localhost:3001/api/tools/run \
             -H "Content-Type: application/json" \
             -H "x-csrf-token: $CSRF" \
             -d '{"target":"https://example.com","loginPath":"../../etc/passwd"}')
@@ -457,7 +464,7 @@ jobs:
           # than assuming only one of the two protective layers fires.
           echo "Testing rate limiting..."
           for i in $(seq 1 105); do
-            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/api/health)
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/health)
             if [ "$i" -gt 100 ] && [ "$CODE" != "429" ] && [ "$CODE" != "403" ]; then
               echo "Request $i returned $CODE (expected 429 or 403)"
               exit 1
