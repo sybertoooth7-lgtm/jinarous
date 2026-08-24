@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { body, validationResult } from 'express-validator';
-import DOMPurify from 'isomorphic-dompurify';
 import db from '../db.js';
 import { recordContactAttempt, recordContactSuccess, recordHoneypotBlocked } from '../stats.js';
 import { sendContactNotification } from '../lib/email.js';
@@ -40,21 +39,22 @@ router.post(
 
     const { name, email, company, message } = req.body;
 
-    // Sanitize before storing
-    const sanitizedMessage = DOMPurify.sanitize(message);
-    const sanitizedName = DOMPurify.sanitize(name);
-
+    // No sanitization step here on purpose: express-validator already
+    // trims these fields above, and dashboard.js HTML-escapes every field
+    // at render time (see the .escape() comment above). Server-side
+    // DOMPurify (via JSDOM) added no real protection on top of that and
+    // is unreliable outside a real browser DOM — removed.
     try {
       const result = await db.query(
         `INSERT INTO contacts (name, email, company, message, status, created_at, updated_at)
          VALUES ($1, $2, $3, $4, 'new', NOW(), NOW())
          RETURNING id`,
-        [sanitizedName, email, company || null, sanitizedMessage]
+        [name, email, company || null, message]
       );
 
       recordContactSuccess();
 
-      sendContactNotification({ name: sanitizedName, company, email, message: sanitizedMessage, id: result.rows[0].id }).catch(err => {
+      sendContactNotification({ name, company, email, message, id: result.rows[0].id }).catch(err => {
         console.error('[email] Notification failed:', err.message);
       });
 
