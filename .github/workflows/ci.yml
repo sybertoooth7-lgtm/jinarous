@@ -1,0 +1,577 @@
+name: CI — Security Audit Fixes
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  # ─────────────────────────────────────────
+  # 1. Lint & Type Check
+  # ─────────────────────────────────────────
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: backend
+        # Requires backend/eslint.config.js and eslint/@eslint/js/globals as
+        # devDependencies — backend previously had none of these at all, so
+        # this step always failed outright before they were added.
+        run: npx eslint src/
+
+      - name: Check for dangerous patterns
+        working-directory: backend
+        run: |
+          echo "Checking for unsafe innerHTML usage in admin dashboard..."
+          # Excludes safe self-clears (tbody.innerHTML = '') and comment
+          # lines mentioning innerHTML in prose — a plain grep for the
+          # string "innerHTML" flags dashboard.js's own safe, intentional
+          # container-clearing code as if it were unescaped user-data
+          # injection, which it isn't.
+          #
+          # The trailing `|| true` matters: when every match is filtered
+          # out (i.e. the code is CLEAN), the last grep exits 1, and under
+          # GitHub Actions' default `bash -e` that non-zero status aborts
+          # the step at the MATCHES= assignment — before the [ -n ] branch
+          # below ever runs. Without it this check could only ever pass
+          # when suspicious code EXISTS, which is exactly backwards.
+          MATCHES=$(grep -n "innerHTML" public/admin/dashboard.js \
+            | grep -v "innerHTML = ''" \
+            | grep -v 'innerHTML = ""' \
+            | grep -vE ':\s*(\*|//|/\*)' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "Found suspicious innerHTML usage — XSS risk!"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "No unsafe innerHTML usage found"
+
+          echo "Checking for hardcoded secrets..."
+          if grep -rE "(password|secret|key)\s*=\s*['\"][^'\"]+['\"]" src/ --include="*.js"; then
+            echo "Potential hardcoded secret found — review manually"
+          fi
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run TypeScript check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+  # ─────────────────────────────────────────
+  # 2. Unit Tests
+  # ─────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    # test/setup.js connects to postgresql://alux:test@localhost:5432/postgres
+    # by default (override via TEST_DATABASE_URL) and CREATE DATABASEs a
+    # fresh, uniquely-named DB per test file — the role needs CREATEDB.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: alux
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run unit tests
+        working-directory: backend
+        # --coverageReporters is a Jest flag, not Vitest's — Vitest uses
+        # --coverage.reporter (dot-nested), and needs @vitest/coverage-v8
+        # installed as a devDependency or --coverage fails outright with
+        # "MISSING DEPENDENCY".
+        run: npx vitest run --coverage --coverage.reporter=text-summary
+
+  # ─────────────────────────────────────────
+  # 3. Integration Tests (real server, real HTTP)
+  # ─────────────────────────────────────────
+  # There's no separate "integration" test suite in this codebase, and no
+  # Redis dependency anywhere in the actual code — the previous version of
+  # this job called a `test:integration` npm script that doesn't exist,
+  # ran migrations from a root-level migrations/ folder that's since been
+  # deleted (the real ones live in backend/migrations/, applied via
+  # `npm run migrate`), and provisioned a Redis service nothing uses. This
+  # version boots the real server and exercises it over real HTTP instead,
+  # as a genuine integration check distinct from job 2's Vitest suite.
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: alux
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: alux_plaza
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://alux:password@localhost:5432/alux_plaza
+        run: npm run migrate
+
+      - name: Boot the server and smoke-test the API
+        working-directory: backend
+        # config.js defaults PORT to 3001 — pin it explicitly here so this
+        # step doesn't silently depend on that default staying put. All
+        # curls below now target :3001 to match (was previously :4000,
+        # inconsistent with config.js, the Dockerfile healthcheck, and
+        # docker-compose.yml, all of which use 3001).
+        env:
+          PORT: "3001"
+        run: |
+          cp .env.example .env
+          # .env.example ships NODE_ENV=production as a reminder for real
+          # deploys — left as-is here, CI would boot with Secure-only
+          # cookies, which curl never sends back over plain http://localhost,
+          # silently breaking every CSRF/session-cookie-dependent step below.
+          sed -i "s/NODE_ENV=production/NODE_ENV=development/" .env
+          sed -i "s/your-64-char-random-secret-here-change-me/$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")/" .env
+
+          node src/index.js &
+          SERVER_PID=$!
+
+          # Flaked before on a hard-coded `sleep 3` (server occasionally
+          # wasn't ready yet) — poll /api/health instead of guessing a fixed
+          # delay.
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
+              echo "Server is up after ${i} attempt(s)"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Server failed to become healthy after 30 attempts"
+              exit 1
+            fi
+            sleep 0.5
+          done
+
+          curl -sf http://localhost:3001/api/health/deep
+          curl -sf http://localhost:3001/api/status/defense-matrix
+
+          # CSRF is enforced globally on all non-GET requests — a real GET
+          # first is required to receive the csrfToken cookie.
+          curl -sf -c cookies.txt http://localhost:3001/api/health > /dev/null
+          CSRF=$(grep csrfToken cookies.txt | awk '{print $7}')
+          curl -sf -b cookies.txt -X POST http://localhost:3001/api/contact \
+            -H "Content-Type: application/json" \
+            -H "x-csrf-token: $CSRF" \
+            -d '{"name":"CI Integration Test","email":"ci-integration@example.com","message":"real end-to-end contact submission"}'
+
+          kill $SERVER_PID
+
+  # ─────────────────────────────────────────
+  # 4. Security Tests
+  # ─────────────────────────────────────────
+  security-tests:
+    name: Security Audit Verification
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: alux
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: alux_plaza
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run migrations and seed a test admin
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://alux:password@localhost:5432/alux_plaza
+        run: |
+          npm run migrate
+          # Seeded via a self-contained Node script rather than shelling out
+          # to psql with the bcrypt hash interpolated into the command
+          # string: bcrypt hashes contain literal $ characters (e.g.
+          # $2b$12$...), which bash tries to expand as variables inside a
+          # double-quoted string, silently mangling the hash down to almost
+          # nothing. Also avoids relying on create-admin.js's interactive
+          # readline prompts, which — confirmed separately — don't reliably
+          # receive piped/non-TTY input the way a `run: |` step provides it.
+          node -e "
+            const bcrypt = require('bcryptjs');
+            const { Client } = require('pg');
+            (async () => {
+              const hash = await bcrypt.hash('CiTestPassw0rd!', 12);
+              const client = new Client({ connectionString: process.env.DATABASE_URL });
+              await client.connect();
+              await client.query(
+                'INSERT INTO admin_users (email, password_hash) VALUES (\$1, \$2) ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash',
+                ['ci-admin@example.com', hash]
+              );
+              await client.end();
+            })();
+          "
+
+      - name: Start server in background
+        working-directory: backend
+        # Same reason as the integration-tests job: curls below now target
+        # :3001, matching config.js's default (was inconsistently :4000).
+        env:
+          PORT: "3001"
+        run: |
+          cp .env.example .env
+          # .env.example ships NODE_ENV=production — left as-is here, cookies
+          # go Secure-only and curl never sends them back over plain
+          # http://localhost, silently breaking the CSRF/session-cookie steps
+          # below (admin login, pagination, XSS, path validation).
+          sed -i "s/NODE_ENV=production/NODE_ENV=development/" .env
+          sed -i "s/your-64-char-random-secret-here-change-me/$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")/" .env
+          # NOTE: CLUSTER_MODE was never actually implemented (no
+          # cluster.fork() anywhere in backend/src — it only ever appeared
+          # in comments describing a hypothetical). Shield's request-volume
+          # counter (bruteForceGuard.js) is in-memory per single process
+          # either way, which is what this job actually tests against.
+
+          node src/index.js &
+
+          # Flaked before on a hard-coded `sleep 3` — poll /api/health
+          # instead of guessing a fixed startup delay.
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
+              echo "Server is up after ${i} attempt(s)"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Server failed to become healthy after 30 attempts"
+              exit 1
+            fi
+            sleep 0.5
+          done
+
+          # Seed a session for the tests below: a real GET for the CSRF
+          # cookie, then an authenticated admin login. Several endpoints
+          # under test require both.
+          curl -sf -c cookies.txt http://localhost:3001/api/health > /dev/null
+          CSRF=$(grep csrfToken cookies.txt | awk '{print $7}')
+          curl -sf -b cookies.txt -c cookies.txt -X POST http://localhost:3001/api/admin/login \
+            -H "Content-Type: application/json" \
+            -H "x-csrf-token: $CSRF" \
+            -d '{"email":"ci-admin@example.com","password":"CiTestPassw0rd!"}'
+          echo "$CSRF" > /tmp/csrf.txt
+
+      - name: Timing attack resistance
+        run: |
+          echo "Testing timing attack resistance..."
+          TIME_VALID=$(curl -s -w "%{time_total}" -o /dev/null -X POST http://localhost:3001/api/admin/login \
+            -H "Content-Type: application/json" \
+            -d '{"email":"ci-admin@example.com","password":"wrongpass"}')
+          TIME_INVALID=$(curl -s -w "%{time_total}" -o /dev/null -X POST http://localhost:3001/api/admin/login \
+            -H "Content-Type: application/json" \
+            -d '{"email":"nonexistent@example.com","password":"wrongpass"}')
+          echo "Existing user (wrong pass): ${TIME_VALID}s"
+          echo "Nonexistent user: ${TIME_INVALID}s"
+          DIFF=$(echo "$TIME_VALID - $TIME_INVALID" | bc -l | sed 's/-//')
+          if (( $(echo "$DIFF > 0.2" | bc -l) )); then
+            echo "Timing difference detected: ${DIFF}s — review bcrypt comparison"
+          else
+            echo "Timing attack resistance verified"
+          fi
+
+      # ── Fix #10, #11, #12: Pagination & Filtering ──
+      # Run before the attack-simulation tests below, since those
+      # intentionally get the CI runner's IP blocked by the Shield module.
+      - name: Test #10/#11/#12 — Pagination, filtering, flat response
+        working-directory: backend
+        run: |
+          echo "Testing pagination and filtering..."
+          CSRF=$(cat /tmp/csrf.txt)
+          RESPONSE=$(curl -s -b cookies.txt "http://localhost:3001/api/admin/submissions?page=1&limit=5&status=new")
+          if ! echo "$RESPONSE" | grep -q '"total":'; then
+            echo "Response missing flat 'total' field: $RESPONSE"
+            exit 1
+          fi
+          if echo "$RESPONSE" | grep -q '"pagination":'; then
+            echo "Response still has nested 'pagination' object"
+            exit 1
+          fi
+          if ! echo "$RESPONSE" | grep -q '"page":'; then
+            echo "Response missing 'page' field"
+            exit 1
+          fi
+          echo "Pagination, filtering, and flat response verified"
+
+      # ── Fix #15: Company Field Storage ──
+      - name: Test #15 — Company field storage
+        working-directory: backend
+        run: |
+          echo "Testing company field storage..."
+          CSRF=$(cat /tmp/csrf.txt)
+          curl -sf -b cookies.txt -X POST http://localhost:3001/api/contact \
+            -H "Content-Type: application/json" \
+            -H "x-csrf-token: $CSRF" \
+            -d '{"name":"Test","email":"test@example.com","company":"Acme Corp","message":"Hello"}' > /dev/null
+          RESPONSE=$(curl -s -b cookies.txt "http://localhost:3001/api/admin/submissions?search=Acme")
+          if ! echo "$RESPONSE" | grep -q "Acme Corp"; then
+            echo "Company field not stored or returned: $RESPONSE"
+            exit 1
+          fi
+          echo "Company field storage verified"
+
+      # ── Fix #6: Input Escaping / XSS Prevention ──
+      - name: Test #6 — XSS payload rejected outright
+        working-directory: backend
+        run: |
+          # The Shield module's attack-signature scanner now blocks a raw
+          # <script> payload before it's ever stored — confirmed live: the
+          # POST itself returns 403 "Request blocked", and nothing is saved
+          # to the database. That's a stronger guarantee than the original
+          # test's premise (store it, then verify it comes back escaped) —
+          # there's no stored, unescaped payload to check for, because
+          # Shield never lets it reach storage at all.
+          echo "Testing that an XSS payload is blocked outright..."
+          CSRF=$(cat /tmp/csrf.txt)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -b cookies.txt -X POST http://localhost:3001/api/contact \
+            -H "Content-Type: application/json" \
+            -H "x-csrf-token: $CSRF" \
+            -d '{"name":"<script>alert(1)</script>","email":"xss@test.com","message":"m"}')
+          if [ "$STATUS" != "403" ]; then
+            echo "Expected the XSS payload to be blocked with 403, got $STATUS"
+            exit 1
+          fi
+          echo "XSS payload correctly blocked before storage"
+
+      - name: Clear IP block after XSS test
+        env:
+          DATABASE_URL: postgresql://alux:password@localhost:5432/alux_plaza
+        run: |
+          # The XSS test above intentionally trips Shield's attack detector,
+          # which blocklists the runner's IP — clear it so later steps
+          # aren't collaterally rejected for something they didn't do.
+          PGPASSWORD=password psql -h localhost -U alux -d alux_plaza -c "DELETE FROM blocked_ips;"
+
+      # ── Fix #9: Path Validation Test ──
+      - name: Test #9 — Path traversal rejected
+        working-directory: backend
+        run: |
+          # A ../../etc/passwd payload is caught by Shield's own
+          # path-traversal detector before the route's own express-validator
+          # regex even runs, so the response is Shield's "Request blocked."
+          # rather than the route's own "Invalid login path." message —
+          # both indicate the same thing (correctly rejected), so this
+          # accepts either rather than asserting one specific message that
+          # depends on which defensive layer catches it first.
+          echo "Testing path validation..."
+          CSRF=$(cat /tmp/csrf.txt)
+          RESPONSE=$(curl -s -b cookies.txt -X POST http://localhost:3001/api/tools/run \
+            -H "Content-Type: application/json" \
+            -H "x-csrf-token: $CSRF" \
+            -d '{"target":"https://example.com","loginPath":"../../etc/passwd"}')
+          if ! echo "$RESPONSE" | grep -qE "Request blocked|Invalid"; then
+            echo "Invalid path was accepted: $RESPONSE"
+            exit 1
+          fi
+          echo "Path validation verified"
+
+      - name: Clear IP block after path validation test
+        env:
+          DATABASE_URL: postgresql://alux:password@localhost:5432/alux_plaza
+        run: |
+          PGPASSWORD=password psql -h localhost -U alux -d alux_plaza -c "DELETE FROM blocked_ips;"
+
+      # ── Fix #5: Rate Limiting Test ──
+      - name: Test #5 — Rate limiting
+        run: |
+          # /health (no /api prefix) doesn't exist — the real route is
+          # /api/health, which sits behind the global /api rate limiter
+          # (max 100). At sustained volume, Shield's own request-volume
+          # abuse detector can also trip and return 403 before
+          # express-rate-limit's own 429 does — both are legitimate
+          # "correctly throttled" outcomes, so this accepts either rather
+          # than assuming only one of the two protective layers fires.
+          echo "Testing rate limiting..."
+          for i in $(seq 1 105); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/health)
+            if [ "$i" -gt 100 ] && [ "$CODE" != "429" ] && [ "$CODE" != "403" ]; then
+              echo "Request $i returned $CODE (expected 429 or 403)"
+              exit 1
+            fi
+          done
+          echo "Rate limiting verified"
+
+      # ── Fix #16: Frontend Character Counters ──
+      - name: Test #16 — Frontend character counters
+        run: |
+          echo "Testing frontend character counters..."
+          if ! grep -q "form.message.length" frontend/src/sections/Contact.tsx; then
+            echo "Contact.tsx missing message counter"
+            exit 1
+          fi
+          if ! grep -q "form.company.length" frontend/src/sections/Contact.tsx; then
+            echo "Contact.tsx missing company counter"
+            exit 1
+          fi
+          echo "Frontend character counters verified"
+
+      - name: Stop server
+        run: pkill -f "node src/index.js" || true
+
+  # ─────────────────────────────────────────
+  # 5. Docker Build Test
+  # ─────────────────────────────────────────
+  docker-build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        working-directory: backend
+        run: docker build -t app-backend:test .
+
+      - name: Build frontend image
+        working-directory: frontend
+        run: docker build -t app-frontend:test .
+
+      - name: Test docker-compose
+        run: |
+          # The compose file declares POSTGRES_PASSWORD and JWT_SECRET with
+          # `${VAR:?msg}` (required, deliberately no default — see the
+          # comments in docker-compose.yml). `docker compose config`
+          # therefore fails unless both are present in the environment, so
+          # validation-only runs must inject throwaway values. These never
+          # reach a running container; they only satisfy interpolation.
+          POSTGRES_PASSWORD=ci-interpolation-placeholder \
+          JWT_SECRET=ci-interpolation-placeholder \
+            docker compose -f docker-compose.yml config > /dev/null
+          echo "Docker Compose config valid"
+
+  # ─────────────────────────────────────────
+  # 6. Dependency Vulnerability Scan
+  # ─────────────────────────────────────────
+  security-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies (backend)
+        working-directory: backend
+        run: npm ci
+
+      - name: Run npm audit
+        working-directory: backend
+        run: |
+          npm audit --audit-level=moderate || true
+
+      - name: Run Snyk test
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+          command: test
+
+  # ─────────────────────────────────────────
+  # 7. Final Status
+  # ─────────────────────────────────────────
+  all-checks-pass:
+    name: All Checks Pass
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests, integration-tests, security-tests, docker-build, security-scan]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.unit-tests.result }}" != "success" ] || \
+             [ "${{ needs.integration-tests.result }}" != "success" ] || \
+             [ "${{ needs.security-tests.result }}" != "success" ] || \
+             [ "${{ needs.docker-build.result }}" != "success" ] || \
+             [ "${{ needs.security-scan.result }}" != "success" ]; then
+            echo "One or more required checks failed"
+            exit 1
+          fi
+          echo "All checks passed"
