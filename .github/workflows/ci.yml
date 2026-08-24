@@ -562,7 +562,8 @@ jobs:
              [ "${{ needs.unit-tests.result }}" != "success" ] || \
              [ "${{ needs.integration-tests.result }}" != "success" ] || \
              [ "${{ needs.security-tests.result }}" != "success" ] || \
-             [ "${{ needs.docker-build.result }}" != "success" ]; then
+             [ "${{ needs.docker-build.result }}" != "success" ] || \
+             [ "${{ needs.security-scan.result }}" != "success" ]; then
             echo "One or more required checks failed"
             exit 1
           fi
