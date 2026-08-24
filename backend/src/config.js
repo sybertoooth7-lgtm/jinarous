@@ -48,7 +48,6 @@ if (isProduction) {
   }
 }
 
-// === L8 FIX: DB_SSL warning in production ===
 if (isProduction && process.env.DB_SSL === 'false') {
   warnings.push('DB_SSL is set to false in production. Database traffic will be unencrypted.');
 }
