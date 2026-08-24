@@ -1,8 +1,9 @@
+// backend/src/middleware/helmetConfig.js
 import helmet from 'helmet';
-import { randomBytes } from 'crypto';
+import { config } from '../config.js';
 
 export function attachCspNonce(req, res, next) {
-  res.locals.cspNonce = randomBytes(16).toString('base64');
+  res.locals.cspNonce = Buffer.from(crypto.randomUUID()).toString('base64');
   next();
 }
 
@@ -11,21 +12,20 @@ export const helmetMiddleware = helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`],
-      styleSrc: ["'self'", (req, res) => `'nonce-${res.locals.cspNonce}'`],
-      imgSrc: ["'self'", 'data:', 'https:'],
+      styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${res.locals.cspNonce}'`],
+      imgSrc: ["'self'", 'data:'],
       connectSrc: ["'self'"],
       fontSrc: ["'self'"],
       objectSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-      baseUri: ["'self'"],
-      formAction: ["'self'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
       upgradeInsecureRequests: [],
     },
   },
-  crossOriginEmbedderPolicy: false,
   hsts: {
     maxAge: 31536000,
     includeSubDomains: true,
     preload: true,
   },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 });
