@@ -8,11 +8,20 @@ import crypto from 'crypto';
 import { body, param, validationResult } from 'express-validator';
 import db from '../db.js';
 import { recordAuditLog } from '../middleware/auditLog.js';
-import DOMPurify from 'isomorphic-dompurify';
 
 const router = Router();
 
 const VALID_STATUSES = ['pending', 'in_progress', 'passing', 'failing', 'not_applicable'];
+
+function sanitizeHtml(input) {
+  if (!input) return '';
+  return input
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/&/g, '&amp;');
+}
 
 /**
  * POST /api/admin/clients
@@ -182,11 +191,9 @@ router.patch('/:id/compliance/:itemId', [
     return res.status(400).json({ errors: errors.array() });
   }
 
-  const { status, notes } = req.body;
+  const { status } = req.body;
   const adminEmail = req.user?.email || 'unknown';
-
-  // Sanitize notes before storing
-  const sanitizedNotes = DOMPurify.sanitize(notes || '');
+  const notes = req.body.notes ? sanitizeHtml(req.body.notes) : null;
 
   try {
     const before = await db.query(
@@ -200,7 +207,7 @@ router.patch('/:id/compliance/:itemId', [
        DO UPDATE SET status = EXCLUDED.status, notes = EXCLUDED.notes,
                      updated_by = EXCLUDED.updated_by, updated_at = NOW()
        RETURNING *`,
-      [req.params.id, req.params.itemId, status, sanitizedNotes || null, adminEmail]
+      [req.params.id, req.params.itemId, status, notes, adminEmail]
     );
     await recordAuditLog({
       adminEmail,
@@ -208,7 +215,7 @@ router.patch('/:id/compliance/:itemId', [
       targetTable: 'client_compliance_status',
       targetId: `${req.params.id}:${req.params.itemId}`,
       oldValue: before.rows[0] || null,
-      newValue: { status, notes: sanitizedNotes || null },
+      newValue: { status, notes },
     });
     res.json({ success: true, status: result.rows[0] });
   } catch (err) {
