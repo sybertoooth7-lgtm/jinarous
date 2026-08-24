@@ -13,6 +13,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Every curl in both boot steps below targets :3001, matching
+    # config.js's default — pinned explicitly at job level so it's not
+    # silently dependent on that default staying put.
+    env:
+      PORT: "3001"
     defaults:
       run:
         working-directory: backend
@@ -68,7 +73,7 @@ jobs:
           # rerun) — poll /api/health instead of guessing a fixed delay.
           echo "Waiting for server to become healthy..."
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:4000/api/health > /dev/null 2>&1; then
+            if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
               echo "Server is up after ${i} attempt(s)"
               break
             fi
@@ -80,20 +85,20 @@ jobs:
           done
 
           echo "Checking /api/health/deep..."
-          curl -sf http://localhost:4000/api/health/deep
+          curl -sf http://localhost:3001/api/health/deep
 
           echo "Checking /api/status/defense-matrix..."
-          curl -sf http://localhost:4000/api/status/defense-matrix
+          curl -sf http://localhost:3001/api/status/defense-matrix
 
           # CSRF is enforced globally on all non-GET requests — a bare curl
           # POST with no prior GET (to receive the csrfToken cookie) and no
           # x-csrf-token header gets rejected with 403, not a real response.
           echo "Seeding CSRF cookie..."
-          curl -sf -c cookies.txt http://localhost:4000/api/health > /dev/null
+          curl -sf -c cookies.txt http://localhost:3001/api/health > /dev/null
           CSRF=$(grep csrfToken cookies.txt | awk '{print $7}')
 
           echo "Submitting a test contact form entry..."
-          curl -sf -b cookies.txt -X POST http://localhost:4000/api/contact \
+          curl -sf -b cookies.txt -X POST http://localhost:3001/api/contact \
             -H "Content-Type: application/json" \
             -H "x-csrf-token: $CSRF" \
             -d '{"name":"CI Test","email":"ci@example.com","message":"automated smoke test"}'
@@ -113,7 +118,7 @@ jobs:
           SERVER_PID=$!
 
           for i in $(seq 1 30); do
-            if curl -sf http://localhost:4000/api/health > /dev/null 2>&1; then
+            if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
               echo "Server is up after ${i} attempt(s)"
               break
             fi
@@ -124,10 +129,10 @@ jobs:
             sleep 0.5
           done
 
-          curl -sf -c cookies.txt http://localhost:4000/api/health > /dev/null
+          curl -sf -c cookies.txt http://localhost:3001/api/health > /dev/null
           CSRF=$(grep csrfToken cookies.txt | awk '{print $7}')
 
-          RESPONSE=$(curl -s -b cookies.txt -X POST http://localhost:4000/api/contact \
+          RESPONSE=$(curl -s -b cookies.txt -X POST http://localhost:3001/api/contact \
             -H "Content-Type: application/json" \
             -H "x-csrf-token: $CSRF" \
             -d '{"name":"Bot","email":"bot@spam.com","message":"spam message","honeypot":"filled-by-bot"}')
