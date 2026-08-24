@@ -3,20 +3,18 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
-import slowDown from 'express-slow-down';
 import cookieParser from 'cookie-parser';
-import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
 import { config } from './config.js';
-import db from './db.js';
+import db, { initDb } from './db.js';
 import { logger } from './logger.js';
 import { pinoHttpMiddleware } from './middleware/pinoHttp.js';
 import { shield } from './middleware/shieldMiddleware.js';
 import { loginAudit } from './middleware/loginAudit.js';
 import { attachCspNonce, helmetMiddleware } from './middleware/helmetConfig.js';
 import { PostgresRateLimitStore } from './lib/rate-limit-store.js';
-import { blocklistToken } from './middleware/auth.js';
+import { requireAuth } from './middleware/auth.js';
+import { requireClientAuth } from './middleware/clientAuth.js';
 import { setCsrfCookie, verifyCsrfToken } from './middleware/csrf.js';
 import { configureTrustProxy } from './config/trusted-proxies.js';
 import { startCleanupScheduler } from './jobs/cleanup.js';
@@ -40,8 +38,6 @@ import healthRoutes from './routes/health.js';
 import { verifyLimiter } from './middleware/verify-rate-limit.js';
 
 import { requireAdmin, requireSuperAdmin } from './middleware/rbac.js';
-
-import { recordAuditLog } from './middleware/auditLog.js';
 import { stats, persistStats } from './stats.js';
 
 async function startServer() {
@@ -86,6 +82,10 @@ async function startServer() {
   });
 
   app.use(loginAudit);
+
+  // NOTE: verifyCsrfToken runs on every route mounted after this point.
+  // Ensure the middleware internally skips safe HTTP methods (GET, HEAD, OPTIONS)
+  // or mount it only on state-changing routes if you prefer stricter control.
   app.use(verifyCsrfToken);
 
   app.use('/api', healthRoutes);
@@ -118,9 +118,12 @@ async function startServer() {
   app.use('/api/status', statusRoutes);
   app.use('/api/verify', verifyLimiter);
   app.use('/api/verify', verifyScoreRoutes);
+
+  // NOTE: The admin SPA is served without authentication.
+  // If the UI exposes sensitive information, consider adding a gate here.
   app.use('/admin', express.static('public/admin'));
 
-  // === L1 FIX: Sanitize error messages in production ===
+  // Sanitize error messages in production
   app.use((err, req, res, next) => {
     logger.error(err);
     const status = err.status || 500;
@@ -130,10 +133,11 @@ async function startServer() {
     res.status(status).json({ error: message });
   });
 
-  // === L2 FIX: Atomic bootstrap admin creation ===
+  // Atomic bootstrap admin creation
   try {
     const bootstrapEmail = config.adminBootstrapEmail;
     const bootstrapPassword = config.adminBootstrapPassword;
+
     if (bootstrapEmail && bootstrapPassword) {
       const hashedPassword = await bcrypt.hash(bootstrapPassword, 12);
       await db.query(
@@ -145,10 +149,17 @@ async function startServer() {
 
     const adminResult = await db.query('SELECT id FROM admin_users LIMIT 1');
     const adminExists = adminResult.rows.length > 0;
-    if (adminExists && (config.adminBootstrapEmail || config.adminBootstrapPassword)) {
-      const message = 'SECURITY WARNING: ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD should be removed from environment variables after the first admin is created.';
-      if (config.isProduction) { logger.error(message); process.exit(1); }
-      else { logger.warn(message); }
+
+    // Warn only when BOTH bootstrap credentials are still set after an admin exists
+    if (adminExists && bootstrapEmail && bootstrapPassword) {
+      const message =
+        'SECURITY WARNING: ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD should be removed from environment variables after the first admin is created.';
+      if (config.isProduction) {
+        logger.error(message);
+        process.exit(1);
+      } else {
+        logger.warn(message);
+      }
     }
   } catch (err) {
     logger.error('Error creating default admin:', err);
@@ -158,7 +169,11 @@ async function startServer() {
     logger.info(`Backend listening on port ${config.port}`);
   });
 
-  const statsInterval = setInterval(() => { stats.requests = 0; stats.errors = 0; }, 60000);
+  const statsInterval = setInterval(() => {
+    stats.requests = 0;
+    stats.errors = 0;
+  }, 60000);
+
   const cleanupInterval = startCleanupScheduler();
 
   async function shutdown(signal) {
@@ -167,7 +182,7 @@ async function startServer() {
     clearInterval(cleanupInterval);
     await persistStats();
     server.close(async () => {
-      await db.end().catch(() => {});
+      await db.end().catch((e) => logger.error('DB close error during shutdown:', e));
       process.exit(0);
     });
     setTimeout(() => process.exit(1), 10_000).unref();
@@ -177,7 +192,10 @@ async function startServer() {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-startServer().catch((err) => {
-  logger.error('Failed to start server:', err);
-  process.exit(1);
-});
+// Initialize DB (runs migrations) then start the server
+initDb()
+  .then(() => startServer())
+  .catch((err) => {
+    logger.error('Failed to initialize database or start server:', err);
+    process.exit(1);
+  });
