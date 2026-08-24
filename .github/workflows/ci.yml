@@ -326,8 +326,7 @@ jobs:
             -d '{"email":"ci-admin@example.com","password":"CiTestPassw0rd!"}'
           echo "$CSRF" > /tmp/csrf.txt
 
-      # ── Fix #3: Timing Attack Test ──
-      - name: Test #3 — Timing attack resistance
+      - name: Timing attack resistance
         run: |
           echo "Testing timing attack resistance..."
           TIME_VALID=$(curl -s -w "%{time_total}" -o /dev/null -X POST http://localhost:4000/api/admin/login \
@@ -567,4 +566,4 @@ jobs:
             echo "One or more required checks failed"
             exit 1
           fi
-          echo "All checks passed — 16 audit issues verified"
+          echo "All checks passed"
