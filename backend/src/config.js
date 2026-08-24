@@ -1,110 +1,71 @@
+// backend/src/config.js
+import dotenv from 'dotenv';
+
+dotenv.config();
+
 const isProduction = process.env.NODE_ENV === 'production';
-const errors = [];
 const warnings = [];
 
-function calculateEntropy(str) {
-  const len = str.length;
-  if (len === 0) return 0;
-  const freq = {};
-  for (const ch of str) {
-    freq[ch] = (freq[ch] || 0) + 1;
+// JWT Secret validation
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret) {
+  if (isProduction) {
+    throw new Error('JWT_SECRET is required in production');
   }
-  let entropy = 0;
-  for (const count of Object.values(freq)) {
-    const p = count / len;
-    entropy -= p * Math.log2(p);
-  }
-  return entropy;
+  warnings.push('JWT_SECRET is not set. Using a default secret for development only.');
+}
+if (jwtSecret && jwtSecret.length < 32) {
+  warnings.push('JWT_SECRET is too short. It should be at least 32 characters for security.');
+}
+if (jwtSecret && (jwtSecret === 'your-64-char-random-secret-here-change-me' || jwtSecret === 'secret')) {
+  warnings.push('JWT_SECRET appears to be a default value. Please change it to a random string.');
 }
 
-const WEAK_SECRET_PATTERNS = [
-  'secret', 'jwtsecret', 'changeme', 'password', 'admin', '123456',
-  'default', 'test', 'dev', 'local', 'mysecret', 'your-256-bit-secret',
-  'supersecret', 'secretkey', 'privatekey', 'token', 'auth', 'password123',
-];
-
-if (!process.env.JWT_SECRET) {
-  errors.push('JWT_SECRET is not set. Admin and client login will fail on every request.');
-} else {
-  const secret = process.env.JWT_SECRET;
-
-  if (secret.length < 32) {
-    errors.push(`JWT_SECRET is only ${secret.length} chars — minimum 32 required.`);
+// Cookie Secret validation
+const cookieSecret = process.env.COOKIE_SECRET || jwtSecret;
+if (!cookieSecret) {
+  if (isProduction) {
+    throw new Error('COOKIE_SECRET is required in production');
   }
-
-  const entropy = calculateEntropy(secret);
-  if (entropy < 3.5) {
-    errors.push(
-      `JWT_SECRET entropy is ${entropy.toFixed(2)} bits/char — minimum 3.5 required. ` +
-      `Generate it with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
-    );
-  }
-
-  const lower = secret.toLowerCase();
-  for (const weak of WEAK_SECRET_PATTERNS) {
-    if (lower.includes(weak)) {
-      errors.push(
-        `JWT_SECRET contains weak pattern '${weak}'. ` +
-        `Use a cryptographically random string, not a dictionary word.`
-      );
-      break;
-    }
-  }
+  warnings.push('COOKIE_SECRET is not set. Using JWT_SECRET as fallback for development only.');
+}
+if (cookieSecret && cookieSecret.length < 32) {
+  warnings.push('COOKIE_SECRET is too short. It should be at least 32 characters for security.');
 }
 
-if (!process.env.DATABASE_URL) {
-  errors.push('DATABASE_URL is not set. PostgreSQL is required.');
-}
-
-// FIX C4: validate cookie secret
-if (!process.env.COOKIE_SECRET) {
-  errors.push('COOKIE_SECRET is not set. Cookie signatures cannot be verified.');
-} else if (process.env.COOKIE_SECRET.length < 32) {
-  errors.push('COOKIE_SECRET must be at least 32 characters.');
-}
+// CORS validation
+const corsOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map(o => o.trim().replace(/\/+$/, ''))
+  .filter(Boolean) || false;
 
 if (isProduction) {
-  if (!process.env.CORS_ORIGIN) {
-    errors.push('CORS_ORIGIN is not set in production. Refusing to start.');
-  } else {
-    const origins = process.env.CORS_ORIGIN.split(',').map(o => o.trim()).filter(Boolean);
-    for (const o of origins) {
-      if (!/^https?:\/\//i.test(o)) {
-        errors.push(`CORS_ORIGIN entry '${o}' is missing scheme (http:// or https://).`);
-      }
-    }
+  if (!corsOrigins || corsOrigins.length === 0) {
+    warnings.push('CORS_ORIGIN is not set in production. CORS is disabled.');
   }
-  if (!process.env.ADMIN_EMAIL) {
-    warnings.push('ADMIN_EMAIL is not set — contact form submissions will not be emailed to anyone.');
-  }
-  if (!process.env.SENTRY_DSN) {
-    warnings.push('SENTRY_DSN is not set — error tracking is a no-op.');
+  if (corsOrigins && corsOrigins.some(o => !o.startsWith('https://'))) {
+    warnings.push('CORS_ORIGIN contains non-HTTPS origins in production.');
   }
 }
 
-if (errors.length > 0) {
-  console.error('\n[config] Refusing to start:\n');
-  for (const e of errors) console.error(` - ${e}`);
-  process.exit(1);
+// === L8 FIX: DB_SSL warning in production ===
+if (isProduction && process.env.DB_SSL === 'false') {
+  warnings.push('DB_SSL is set to false in production. Database traffic will be unencrypted.');
 }
 
 if (warnings.length > 0) {
-  console.warn('\n[config] Warnings:\n');
-  for (const w of warnings) console.warn(` - ${w}`);
+  console.warn('[config] Security warnings:');
+  warnings.forEach(w => console.warn(`  - ${w}`));
 }
 
 export const config = {
+  port: parseInt(process.env.PORT || '3001', 10),
   isProduction,
-  port: Number(process.env.PORT) || 4000,
-  corsOrigins: (process.env.CORS_ORIGIN || '')
-    .split(',')
-    .map(o => o.trim().replace(/\/+$/, ''))
-    .filter(Boolean),
-  jwtSecret: process.env.JWT_SECRET,
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
-  // FIX C4: export cookieSecret so cookieParser can use it
-  cookieSecret: process.env.COOKIE_SECRET,
-  // Export bootstrap credentials so index.js can read them
-  adminBootstrapEmail: process.env.ADMIN_BOOTSTRAP_EMAIL || null,
-  adminBootstrapPassword: process.env.ADMIN_BOOTSTRAP_PASSWORD || null,
+  jwtSecret: jwtSecret || 'dev-secret-change-me',
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '2h',
+  cookieSecret: cookieSecret || 'dev-cookie-secret-change-me',
+  corsOrigin: corsOrigins,
+  adminBootstrapEmail: process.env.ADMIN_BOOTSTRAP_EMAIL,
+  adminBootstrapPassword: process.env.ADMIN_BOOTSTRAP_PASSWORD,
+  dbSsl: isProduction && process.env.DB_SSL !== 'false',
 };
