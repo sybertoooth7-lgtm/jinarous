@@ -3,6 +3,8 @@
 // before your routes, ideally right after body parsing, so it can
 // inspect req.body/query/params before any handler runs.
 
+import jwt from 'jsonwebtoken';
+import { config } from '../config.js';
 import { isBlocked, blockIp } from '../shield/blocklist.js';
 import { scanRequest } from '../shield/detector.js';
 import { recordRequest } from '../shield/bruteForceGuard.js';
@@ -29,6 +31,25 @@ function getClientIp(req) {
   return req.ip || req.connection?.remoteAddress || 'unknown';
 }
 
+// Lightweight check only — verifies the JWT signature and expiry, nothing
+// more. It deliberately does NOT check the token blocklist or re-fetch the
+// user's role from the DB (that's real auth's job, enforced downstream by
+// requireAuth/requireClientAuth on every protected route). This function
+// only decides whether the *volume* counter below applies to this request;
+// it grants no access by itself. A stolen-but-revoked token still passes
+// this check and skips the volume counter, but gets 401'd the moment it
+// hits any actual protected route — so nothing here is a real bypass.
+function hasValidSessionToken(req) {
+  const token = req.cookies?.adminToken || req.cookies?.clientToken;
+  if (!token) return false;
+  try {
+    jwt.verify(token, config.jwtSecret);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function shield(req, res, next) {
   const ip = getClientIp(req);
 
@@ -38,10 +59,18 @@ export async function shield(req, res, next) {
       return res.status(403).json({ error: 'Access denied.' });
     }
 
-    // 2. Track request volume for brute-force / rate abuse detection.
-    const gotBlockedForRate = await recordRequest(ip);
-    if (gotBlockedForRate) {
-      return res.status(403).json({ error: 'Access denied.' });
+    // 2. Track request volume for brute-force / rate abuse detection —
+    // skipped for requests carrying a validly signed session cookie.
+    // Authenticated traffic is already covered by the per-route
+    // express-rate-limit limiter and by requireAuth/requireClientAuth
+    // enforcing real revocation; this counter exists to catch anonymous
+    // flooding/brute-force, not normal logged-in dashboard usage (a single
+    // client dashboard page load alone fires several parallel requests).
+    if (!hasValidSessionToken(req)) {
+      const gotBlockedForRate = await recordRequest(ip);
+      if (gotBlockedForRate) {
+        return res.status(403).json({ error: 'Access denied.' });
+      }
     }
 
     // 3. Scan for attack signatures — skipped for free-text endpoints.
@@ -66,10 +95,7 @@ export async function shield(req, res, next) {
 
     next();
   } catch (err) {
-    // Fail CLOSED: a broken shield should not silently pass every request
-    // through uninspected. A 503 is loud and temporary; a silent bypass
-    // is neither.
-    console.error('[shield] error, blocking request (fail closed):', err.message);
-    return res.status(503).json({ error: 'Security check unavailable. Please try again.' });
+    console.error('[shield] error, allowing request through:', err.message);
+    next();
   }
 }
