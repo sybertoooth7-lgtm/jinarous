@@ -1,6 +1,7 @@
 // backend/src/routes/status.js
 import { Router } from 'express';
 import { stats } from '../stats.js';
+import { getPersistedTotals } from '../stats.js'; // ADD THIS IMPORT
 
 const router = Router();
 
@@ -19,11 +20,12 @@ function getAverageLatencyMs() {
   return (sum / stats.latencies.length).toFixed(2);
 }
 
-function getAutoResponseRate() {
-  if (stats.requestCount === 0) return 0;
-  return ((stats.autoResponses / stats.requestCount) * 100).toFixed(2);
+function getContactSuccessRate() {
+  if (stats.contactAttempts === 0) return 0;
+  return ((stats.contactSuccesses / stats.contactAttempts) * 100).toFixed(2);
 }
 
+// OLD endpoint (keep for backward compat)
 router.get('/', (req, res) => {
   res.json({
     status: 'ok',
@@ -32,9 +34,28 @@ router.get('/', (req, res) => {
     averageLatencyMs: getAverageLatencyMs(),
     totalRequests: stats.requestCount,
     totalErrors: stats.errorCount,
-    autoResponseRate: getAutoResponseRate(),
+    autoResponseRate: getContactSuccessRate(),
     honeypotBlocked: stats.honeypotBlocked,
     serverStartTime: stats.serverStartTime,
+  });
+});
+
+// NEW endpoint — matches exactly what the frontend expects
+router.get('/defense-matrix', async (req, res) => {
+  const persisted = await getPersistedTotals().catch(() => ({}));
+  
+  res.json({
+    requestCount: persisted.requestCount ?? stats.requestCount,
+    errorCount: persisted.errorCount ?? stats.errorCount,
+    averageLatencyMs: stats.latencies.length > 0 
+      ? parseFloat(getAverageLatencyMs()) 
+      : null,
+    requestsPerSecond: parseFloat(getRequestsPerSecond()),
+    uptimeSeconds: getUptimeSeconds(),
+    contactSuccessRate: stats.contactAttempts > 0 
+      ? parseFloat(getContactSuccessRate()) 
+      : null,
+    honeypotBlocked: persisted.honeypotBlocked ?? stats.honeypotBlocked,
   });
 });
 
