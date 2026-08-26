@@ -35,7 +35,7 @@ export default function DefenseMatrix() {
 
     async function fetchStatus() {
       try {
-        const res = await fetch(`${API_BASE}/api/status/defense-matrix`);
+        const res = await fetch(`${API_BASE}/api/status`);
         if (!res.ok) throw new Error('Status endpoint unavailable');
         const data: StatusResponse = await res.json();
         if (cancelled) return;
