@@ -7,7 +7,6 @@ import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
 import toolsRoutes from '../src/routes/tools.js';
 import db from '../src/db.js';
-import { execSync } from 'node:child_process';
 
 function buildTestApp() {
   const app = express();
@@ -32,20 +31,6 @@ async function makeAdminTokenAndUser() {
   return { email, token };
 }
 
-// Requires python3 + the `requests` package on the machine running the
-// tests, since this route actually spawns tools/auth_audit.py. Skipped
-// automatically if python3 isn't on PATH, so the rest of the suite (and
-// CI environments without Python) aren't blocked by this one integration
-// point.
-const hasPython = (() => {
-  try {
-    execSync('python3 -c "import requests"', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
 describe('POST /api/admin/tools/run', () => {
   it('rejects requests with no auth token', async () => {
     const app = buildTestApp();
@@ -63,7 +48,7 @@ describe('POST /api/admin/tools/run', () => {
     expect(res.status).toBe(400);
   });
 
-  it.skipIf(!hasPython)(
+  it(
     'runs a real audit against a live target and persists the result',
     async () => {
       const { token, email } = await makeAdminTokenAndUser();
@@ -76,8 +61,14 @@ describe('POST /api/admin/tools/run', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(Array.isArray(res.body.result.findings)).toBe(true);
+      // runAuthAudit() returns { target, login_path, checks, summary } —
+      // checks is a keyed object of individual pass/fail results, not a
+      // findings array (that was the old Python tool's shape, before the
+      // pure-Node.js rewrite of this route).
+      expect(typeof res.body.result.checks).toBe('object');
+      expect(Object.keys(res.body.result.checks).length).toBeGreaterThan(0);
       expect(res.body.result.summary).toBeTruthy();
+      expect(typeof res.body.result.summary.score).toBe('number');
 
       const { rows } = await db.query(
         "SELECT * FROM tool_runs WHERE tool = 'auth_audit' AND target = $1 ORDER BY created_at DESC LIMIT 1",
@@ -88,7 +79,10 @@ describe('POST /api/admin/tools/run', () => {
       expect(rows[0].run_by).toBe(email);
       // JSONB columns come back already parsed by the pg driver - no
       // JSON.parse() needed (and calling it would throw on an object).
-      expect(rows[0].result_json.findings.length).toBe(res.body.result.findings.length);
+      expect(Object.keys(rows[0].result_json.checks).length).toBe(
+        Object.keys(res.body.result.checks).length
+      );
+      expect(rows[0].result_json.summary.score).toBe(res.body.result.summary.score);
     },
     30_000 // real network calls involved - needs a longer timeout than default
   );
