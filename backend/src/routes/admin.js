@@ -5,10 +5,11 @@ import crypto from 'crypto';
 import { body, param, query, validationResult } from 'express-validator';
 import db from '../db.js';
 import { config } from '../config.js';
-import { requireAuth, blocklistToken } from '../middleware/auth.js';
+import { requireAuth, blocklistToken, isBlocklisted } from '../middleware/auth.js';
 import { requireAdmin } from '../middleware/rbac.js';
 import { recordFailedLogin } from '../shield/bruteForceGuard.js';
 import { recordAuditLog } from '../middleware/auditLog.js';
+import { parseExpiryToMs } from '../lib/parseExpiry.js';
 
 const router = Router();
 
@@ -31,16 +32,6 @@ function computeLockoutMinutes(failedCount) {
   if (failedCount < MAX_FAILED_ATTEMPTS) return 0;
   const minutes = BASE_LOCKOUT_MINUTES * Math.pow(2, failedCount - MAX_FAILED_ATTEMPTS);
   return Math.min(minutes, MAX_LOCKOUT_MINUTES);
-}
-
-function parseExpiryToMs(value, fallbackMs) {
-  if (!value) return fallbackMs;
-  const match = String(value).trim().match(/^(\d+)\s*(ms|s|m|h|d)?$/i);
-  if (!match) return fallbackMs;
-  const amount = Number(match[1]);
-  const unit = (match[2] || 's').toLowerCase();
-  const multipliers = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
-  return amount * (multipliers[unit] || 1000);
 }
 
 const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 8 * 60 * 60 * 1000);
@@ -158,6 +149,15 @@ router.post('/mfa/verify', [
       return res.status(401).json({ error: 'Invalid or expired MFA token. Please log in again.' });
     }
 
+    // Reject replay of an already-completed (or already-attempted) MFA
+    // challenge. Without this, anyone who captures a successful verify
+    // request (network capture, browser history, a compromised proxy)
+    // could resend the exact same mfaToken + code to open a second
+    // session, any time within the token's 5-minute window.
+    if (mfaPayload.jti && await isBlocklisted(mfaPayload.jti)) {
+      return res.status(401).json({ error: 'This MFA challenge has already been used. Please log in again.' });
+    }
+
     const { rows } = await db.query(
       'SELECT id, email, role, mfa_secret, mfa_enabled, mfa_backup_codes FROM admin_users WHERE id = $1',
       [mfaPayload.sub]
@@ -191,6 +191,15 @@ router.post('/mfa/verify', [
       // Log failed MFA attempt
       await recordFailedLogin(req.ip);
       return res.status(401).json({ error: 'Invalid MFA code.' });
+    }
+
+    // Mark this MFA challenge as consumed so it can never be used again —
+    // turns a 5-minute-reusable token into a genuinely single-use one.
+    // Only marked on success: a mistyped code should still let the user
+    // try again within the same challenge window.
+    if (mfaPayload.jti) {
+      const expiresAt = mfaPayload.exp ? new Date(mfaPayload.exp * 1000) : new Date(Date.now() + 5 * 60 * 1000);
+      await blocklistToken(mfaPayload.jti, expiresAt);
     }
 
     // Issue full session
