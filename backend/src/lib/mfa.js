@@ -11,11 +11,26 @@ const TIME_STEP = 30;
 const VALID_WINDOW = 1;
 const BACKUP_CODE_COUNT = 10;
 
+// BREAKING CHANGE (intentional): this used to be
+// sha256(config.jwtSecret) — the same signing secret, reused directly as
+// an encryption key with zero key stretching. That means a leaked
+// JWT_SECRET also decrypted every stored MFA secret, and the encryption
+// key was only as strong as whatever JWT_SECRET happened to be.
+// This derives via HKDF-SHA256 instead (real key stretching, and a fixed
+// "info" label that domain-separates this key from any other use of the
+// same input material), and prefers a dedicated MFA_ENCRYPTION_KEY over
+// JWT_SECRET entirely when one is set (see config.js).
+// Because the derivation itself changed, any admin_users.mfa_secret value
+// encrypted under the old scheme can no longer be decrypted — affected
+// admins need to disable and re-enroll MFA after this deploys.
 function getEncryptionKey() {
-  if (!config.jwtSecret) {
-    throw new Error('JWT_SECRET is required for MFA secret encryption');
+  const keyMaterial = config.mfaEncryptionKey || config.jwtSecret;
+  if (!keyMaterial) {
+    throw new Error('Neither MFA_ENCRYPTION_KEY nor JWT_SECRET is set — cannot encrypt/decrypt MFA secrets.');
   }
-  return crypto.createHash('sha256').update(config.jwtSecret).digest();
+  return Buffer.from(
+    crypto.hkdfSync('sha256', keyMaterial, '', 'alux-plaza-mfa-encryption-v1', 32)
+  );
 }
 
 export function encryptSecret(plainSecret) {
