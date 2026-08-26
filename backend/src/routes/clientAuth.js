@@ -8,9 +8,13 @@ import db from '../db.js';
 import { config } from '../config.js';
 import { recordFailedLogin } from '../shield/bruteForceGuard.js';
 import { logLoginAttempt, isNewIp, alertNewDevice } from '../middleware/loginAudit.js';
+import { parseExpiryToMs } from '../lib/parseExpiry.js';
 
 const router = Router();
-const COOKIE_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+// Derived from config.jwtExpiresIn instead of a hardcoded value, so the
+// cookie, the DB session row, and the JWT itself always agree on how long
+// a client session actually lasts.
+const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 2 * 60 * 60 * 1000);
 const DUMMY_HASH = '$2a$12$abcdefghijklmnopqrstuvwxycdefghijklmnopqrstu';
 
 function computeLockoutMinutes(count) {
@@ -110,9 +114,14 @@ router.post('/logout', async (req, res) => {
   try {
     const decoded = jwt.verify(token, config.jwtSecret);
     if (decoded.jti) {
+      // Use the token's own exp claim, not COOKIE_MAX_AGE_MS — if
+      // JWT_EXPIRES_IN is ever changed, a stale hardcoded window here
+      // would let a "logged out" token remain replayable for however
+      // long the real token outlives the blocklist entry.
+      const expiresAt = decoded.exp ? new Date(decoded.exp * 1000) : new Date(Date.now() + COOKIE_MAX_AGE_MS);
       await db.query(
         `INSERT INTO token_blocklist (jti, expires_at) VALUES ($1, $2) ON CONFLICT (jti) DO NOTHING`,
-        [decoded.jti, new Date(Date.now() + COOKIE_MAX_AGE_MS)]
+        [decoded.jti, expiresAt]
       );
       await db.query('DELETE FROM client_sessions WHERE jti = $1', [decoded.jti]);
     }
