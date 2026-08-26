@@ -25,6 +25,17 @@ function isBlockedIPv4(ip) {
 
 function isBlockedIPv6(ip) {
   const lower = ip.toLowerCase();
+
+  // IPv4-mapped IPv6 addresses (::ffff:a.b.c.d) — normalize back to plain
+  // IPv4 and reuse the already-complete IPv4 blocklist, instead of
+  // hardcoding just the loopback prefix here. A DNS record resolving to
+  // e.g. ::ffff:169.254.169.254 (cloud metadata) or ::ffff:10.x.x.x
+  // (internal network) must be caught the same as its plain-IPv4 form.
+  const mappedMatch = lower.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (mappedMatch) {
+    return isBlockedIPv4(mappedMatch[1]);
+  }
+
   return (
     lower === '::1' ||
     lower.startsWith('fc') ||
@@ -32,8 +43,7 @@ function isBlockedIPv6(ip) {
     lower.startsWith('fe8') ||
     lower.startsWith('fe9') ||
     lower.startsWith('fea') ||
-    lower.startsWith('feb') ||
-    lower.startsWith('::ffff:127.')
+    lower.startsWith('feb')
   );
 }
 
