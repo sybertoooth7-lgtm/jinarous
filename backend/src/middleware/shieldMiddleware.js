@@ -35,18 +35,26 @@ function getClientIp(req) {
 // more. It deliberately does NOT check the token blocklist or re-fetch the
 // user's role from the DB (that's real auth's job, enforced downstream by
 // requireAuth/requireClientAuth on every protected route). This function
-// only decides whether the *volume* counter below applies to this request;
-// it grants no access by itself. A stolen-but-revoked token still passes
-// this check and skips the volume counter, but gets 401'd the moment it
-// hits any actual protected route — so nothing here is a real bypass.
-function hasValidSessionToken(req) {
+// only decides what the request-volume counter buckets by; it grants no
+// access by itself. A stolen-but-revoked token still passes this check and
+// gets counted under its own identity instead of the shared IP, but gets
+// 401'd the moment it hits any actual protected route — so nothing here is
+// a real bypass.
+//
+// Returns a stable per-account identity string ("admin:42" / "client:7")
+// when a validly signed session cookie is present, or null for anonymous
+// requests. admin_users and clients are separate tables with independently
+// numbered ids, so the prefix keeps an admin id=5 and a client id=5 from
+// colliding into the same counter bucket.
+function getSessionIdentity(req) {
   const token = req.cookies?.adminToken || req.cookies?.clientToken;
-  if (!token) return false;
+  if (!token) return null;
   try {
-    jwt.verify(token, config.jwtSecret);
-    return true;
+    const decoded = jwt.verify(token, config.jwtSecret);
+    const kind = decoded.role === 'client' ? 'client' : 'admin';
+    return `${kind}:${decoded.sub}`;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -59,18 +67,19 @@ export async function shield(req, res, next) {
       return res.status(403).json({ error: 'Access denied.' });
     }
 
-    // 2. Track request volume for brute-force / rate abuse detection —
-    // skipped for requests carrying a validly signed session cookie.
-    // Authenticated traffic is already covered by the per-route
-    // express-rate-limit limiter and by requireAuth/requireClientAuth
-    // enforcing real revocation; this counter exists to catch anonymous
-    // flooding/brute-force, not normal logged-in dashboard usage (a single
-    // client dashboard page load alone fires several parallel requests).
-    if (!hasValidSessionToken(req)) {
-      const gotBlockedForRate = await recordRequest(ip);
-      if (gotBlockedForRate) {
-        return res.status(403).json({ error: 'Access denied.' });
-      }
+    // 2. Track request volume for brute-force / rate abuse detection.
+    // Anonymous requests are counted by IP, same as always. Authenticated
+    // requests are counted by account identity instead — a logged-in
+    // user's own usage (a dashboard page alone fires several parallel
+    // calls) no longer stacks against everyone else sharing their IP
+    // (office network, VPN, mobile carrier NAT). If one specific account
+    // genuinely floods the server, it still gets caught and its current
+    // IP still gets blocked — only the *counting* changed, not the
+    // consequence.
+    const identity = getSessionIdentity(req);
+    const gotBlockedForRate = await recordRequest(identity || ip, ip);
+    if (gotBlockedForRate) {
+      return res.status(403).json({ error: 'Access denied.' });
     }
 
     // 3. Scan for attack signatures — skipped for free-text endpoints.
