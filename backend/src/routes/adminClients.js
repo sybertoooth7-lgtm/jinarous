@@ -13,16 +13,6 @@ const router = Router();
 
 const VALID_STATUSES = ['pending', 'in_progress', 'passing', 'failing', 'not_applicable'];
 
-function sanitizeHtml(input) {
-  if (!input) return '';
-  return input
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .replace(/&/g, '&amp;');
-}
-
 /**
  * POST /api/admin/clients
  * Creates a new client account. Generates a random temporary password
@@ -193,7 +183,7 @@ router.patch('/:id/compliance/:itemId', [
 
   const { status } = req.body;
   const adminEmail = req.user?.email || 'unknown';
-  const notes = req.body.notes ? sanitizeHtml(req.body.notes) : null;
+  const notes = req.body.notes ? req.body.notes.trim() : null;
 
   try {
     const before = await db.query(
