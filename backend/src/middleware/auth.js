@@ -16,10 +16,17 @@ export async function blocklistToken(jti, expiresAt) {
   }
 }
 
-async function isBlocklisted(jti) {
+export async function isBlocklisted(jti) {
   if (!jti) return false;
   try {
-    const result = await db.query('SELECT 1 FROM token_blocklist WHERE jti = $1', [jti]);
+    // Matches the same fix already applied on the client side (clientAuth.js
+    // FIX C6) — without the expiry check, an already-passed blocklist row
+    // just sits there until the daily cleanup job removes it, instead of
+    // being treated as stale the moment it expires.
+    const result = await db.query(
+      'SELECT 1 FROM token_blocklist WHERE jti = $1 AND expires_at > NOW()',
+      [jti]
+    );
     return result.rows.length > 0;
   } catch (err) {
     console.error('[auth] Blocklist check failed:', err.message);
