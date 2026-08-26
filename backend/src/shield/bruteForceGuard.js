@@ -41,17 +41,25 @@ export async function recordFailedLogin(ip) {
 }
 
 /**
- * Call this from Shield middleware on every request to track abnormal volume.
+ * Call this from Shield middleware on every request to track abnormal
+ * volume. `countKey` is what the rolling counter buckets by — an IP for
+ * anonymous traffic, or a stable per-account identity (e.g. "admin:42")
+ * for authenticated traffic, so that multiple different logged-in users
+ * sharing one IP (office network, VPN, mobile carrier NAT) don't get
+ * counted together and collectively blocked over one person's normal
+ * usage. `blockTargetIp` is always a real IP — that's what actually gets
+ * blocked if the threshold is crossed, since isBlocked() below always
+ * checks the request's real IP regardless of who's authenticated.
  */
-export async function recordRequest(ip) {
-  const existing = pruneOld(requestCounts.get(ip) || [], REQUEST_RATE_WINDOW_MS);
+export async function recordRequest(countKey, blockTargetIp) {
+  const existing = pruneOld(requestCounts.get(countKey) || [], REQUEST_RATE_WINDOW_MS);
   existing.push(Date.now());
-  requestCounts.set(ip, existing);
+  requestCounts.set(countKey, existing);
 
   if (existing.length >= REQUEST_RATE_THRESHOLD) {
-    await logSecurityEvent({ ip, eventType: 'rate_abuse', severity: 'medium', blocked: true });
-    await blockIp(ip, `${existing.length} requests in ${REQUEST_RATE_WINDOW_MS / 1000}s`, 'medium');
-    requestCounts.delete(ip);
+    await logSecurityEvent({ ip: blockTargetIp, eventType: 'rate_abuse', severity: 'medium', blocked: true });
+    await blockIp(blockTargetIp, `${existing.length} requests in ${REQUEST_RATE_WINDOW_MS / 1000}s (${countKey})`, 'medium');
+    requestCounts.delete(countKey);
     return true;
   }
   return false;
