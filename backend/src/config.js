@@ -29,6 +29,19 @@ if (cookieSecret && cookieSecret.length < 32) {
   warnings.push('COOKIE_SECRET is too short. It should be at least 32 characters for security.');
 }
 
+// MFA encryption key — deliberately separate from JWT_SECRET. A signing
+// key and an encryption key should never be the same secret (if one ever
+// leaks, the other stays safe). Falls back to deriving from JWT_SECRET via
+// HKDF (not the old raw-SHA256 scheme) if not set, so MFA still works
+// without a second secret configured, but a dedicated key is strongly
+// recommended — see the warning below.
+const mfaEncryptionKey = process.env.MFA_ENCRYPTION_KEY || '';
+if (!mfaEncryptionKey) {
+  warnings.push('MFA_ENCRYPTION_KEY is not set. Falling back to a key derived from JWT_SECRET — set a dedicated MFA_ENCRYPTION_KEY (32+ random bytes) so a leaked JWT_SECRET cannot also decrypt stored MFA secrets.');
+} else if (mfaEncryptionKey.length < 32) {
+  warnings.push('MFA_ENCRYPTION_KEY is too short. It should be at least 32 characters for security.');
+}
+
 // CORS validation
 // CORS_ORIGIN is required in production — without it, the browser silently
 // blocks every request from the real frontend, which is a confusing,
@@ -78,6 +91,7 @@ export const config = {
   jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '2h',
   cookieSecret,
+  mfaEncryptionKey,
   corsOrigins,
   adminBootstrapEmail: process.env.ADMIN_BOOTSTRAP_EMAIL,
   adminBootstrapPassword: process.env.ADMIN_BOOTSTRAP_PASSWORD,
