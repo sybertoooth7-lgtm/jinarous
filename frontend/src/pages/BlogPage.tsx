@@ -1,5 +1,4 @@
 import { Calendar, Clock, ArrowRight, Tag } from 'lucide-react';
-import { Link } from 'react-router';
 import Navigation from '../sections/Navigation';
 import Footer from '../sections/Footer';
 
