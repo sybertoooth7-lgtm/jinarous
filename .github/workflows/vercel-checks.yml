@@ -1,0 +1,16 @@
+name: Vercel Checks
+
+on:
+  deployment_status:
+
+jobs:
+  notify-vercel:
+    runs-on: ubuntu-latest
+    if: github.event.deployment_status.state == 'success' || github.event.deployment_status.state == 'failure'
+    steps:
+      - name: Notify Vercel of check status
+        uses: vercel/repository-dispatch/actions/status@v1
+        with:
+          name: Vercel - sybertoooth7-lgtm-jinarous: lint
+          status: ${{ github.event.deployment_status.state == 'success' && 'success' || 'failure' }}
+          token: ${{ secrets.VERCEL_TOKEN }}
