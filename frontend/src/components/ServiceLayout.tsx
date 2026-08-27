@@ -1,4 +1,4 @@
-import { ArrowLeft, Shield } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router';
 import Navigation from '../sections/Navigation';
 import Footer from '../sections/Footer';
