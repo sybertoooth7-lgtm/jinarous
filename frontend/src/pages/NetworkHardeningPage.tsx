@@ -1,11 +1,11 @@
-import { Network, Router, Firewall, Wifi, Eye, Wrench } from 'lucide-react';
+import { Network, Router, ShieldAlert, Wifi, Eye, Wrench } from 'lucide-react';
 import ServiceLayout from '../components/ServiceLayout';
 
 const areas = [
   {
     title: 'Perimeter Hardening',
     desc: 'Firewall rule audit, DMZ design, VPN configuration review, and edge-device patching.',
-    icon: <Firewall className="w-6 h-6" />,
+    icon: <ShieldAlert className="w-6 h-6" />,
   },
   {
     title: 'Segmentation & Zero Trust',
