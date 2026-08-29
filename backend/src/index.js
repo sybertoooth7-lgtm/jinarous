@@ -57,8 +57,22 @@ async function startServer() {
     ? config.corsOrigins
     : ['http://localhost:3000'];
 
+  // Vercel gives every preview deployment a unique, unpredictable hostname
+  // (jinarous-<hash>-sybertoooth7-lgtms-projects.vercel.app), so it can
+  // never be fully enumerated in a static CORS_ORIGIN allowlist. Match the
+  // pattern instead, scoped to this exact Vercel project/org so it can't
+  // accidentally allow someone else's Vercel-hosted site.
+  const VERCEL_PREVIEW_ORIGIN_RE = /^https:\/\/jinarous-[a-z0-9]+-sybertoooth7-lgtms-projects\.vercel\.app$/;
+
   app.use(cors({
-    origin: allowedOrigins,
+    origin(origin, callback) {
+      // No Origin header (curl, server-to-server, same-origin) — allow.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin) || VERCEL_PREVIEW_ORIGIN_RE.test(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Not allowed by CORS: ${origin}`));
+    },
     credentials: true,
   }));
 
