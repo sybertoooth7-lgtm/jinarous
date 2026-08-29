@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { API_BASE } from '@/lib/api';
+import { secureFetch } from '@/lib/security';
 import MfaVerifyModal from '@/components/MfaVerifyModal';
 
 export default function AdminLogin() {
@@ -20,10 +20,9 @@ export default function AdminLogin() {
     setError('');
 
     try {
-      const res = await fetch(`${API_BASE}/api/admin/login`, {
+      const res = await secureFetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
