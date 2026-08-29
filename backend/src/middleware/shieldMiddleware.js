@@ -25,6 +25,8 @@ const SIGNATURE_SCAN_EXEMPT_PATHS = [
   '/api/contact',               // public contact form (message field)
   '/api/admin/submissions',     // admin search queries (search param)
   '/api/admin/clients',         // compliance notes (notes field on PATCH .../compliance/:itemId)
+  '/api/admin/login',           // free-text email/password fields can coincidentally match signatures
+  '/api/client/login',          // same — a legit password shouldn't be able to trigger an IP block
 ];
 
 function getClientIp(req) {
