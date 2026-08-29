@@ -70,6 +70,11 @@ export default function Contact() {
     borderRadius: '6px',
     fontSize: '16px',
     boxSizing: 'border-box',
+    // Without these, the input inherits this page's global dark-theme
+    // text color (white) while keeping a plain white background —
+    // typed text becomes invisible even though it's really there.
+    color: '#111827',
+    backgroundColor: '#fff',
   };
 
   const labelStyle: React.CSSProperties = {
