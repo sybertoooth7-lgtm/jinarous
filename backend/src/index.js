@@ -100,6 +100,17 @@ async function startServer() {
 
   app.use(verifyCsrfToken);
 
+  // Frontend and backend are on different domains (Vercel + Render), so
+  // the frontend's JS can never read the csrfToken cookie directly — a
+  // cookie set for onrender.com is invisible to document.cookie running
+  // on vercel.app, full stop, regardless of any cookie flags. This route
+  // is how the frontend gets the current token instead: a GET request
+  // (safe method, no CSRF check needed) that echoes back whatever
+  // setCsrfCookie already put on req.csrfToken above.
+  app.get('/api/csrf-token', (req, res) => {
+    res.json({ csrfToken: req.csrfToken });
+  });
+
   // Health checks — unauthenticated, unrated, cached to avoid DB exhaustion.
   app.use('/api', healthRoutes);
 
