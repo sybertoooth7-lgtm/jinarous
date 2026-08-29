@@ -42,7 +42,7 @@ export default function ClientLogin() {
         console.warn('New device login detected — check your email');
       }
 
-      window.location.href = '/dashboard';
+      window.location.href = '/client/dashboard';
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Invalid credentials');
     } finally {
