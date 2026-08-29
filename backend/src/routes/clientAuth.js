@@ -7,7 +7,7 @@ import { body, validationResult } from 'express-validator';
 import db from '../db.js';
 import { config } from '../config.js';
 import { recordFailedLogin } from '../shield/bruteForceGuard.js';
-import { logLoginAttempt, isNewIp, alertNewDevice } from '../middleware/loginAudit.js';
+import { logLoginAttempt, isNewIp, alertNewDevice, DUMMY_HASH } from '../middleware/loginAudit.js';
 import { parseExpiryToMs } from '../lib/parseExpiry.js';
 
 const router = Router();
@@ -15,7 +15,11 @@ const router = Router();
 // cookie, the DB session row, and the JWT itself always agree on how long
 // a client session actually lasts.
 const COOKIE_MAX_AGE_MS = parseExpiryToMs(config.jwtExpiresIn, 2 * 60 * 60 * 1000);
-const DUMMY_HASH = '$2a$12$abcdefghijklmnopqrstuvwxycdefghijklmnopqrstu';
+// Shared valid bcrypt hash (also used by admin.js) — comparing against a
+// real hash keeps failed-login timing indistinguishable from a real user,
+// closing the user-enumeration timing side-channel a malformed dummy hash
+// would otherwise open (bcrypt short-circuits on malformed hashes instead
+// of running the full comparison).
 
 function computeLockoutMinutes(count) {
   if (count <= 3) return 0;
