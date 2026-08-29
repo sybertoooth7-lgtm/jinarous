@@ -17,8 +17,16 @@ export function setCsrfCookie(req, res, next) {
     token = generateToken();
     res.cookie(CSRF_COOKIE, token, {
       httpOnly: false,        // must be readable by frontend JS
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      // SameSite=None is required here because frontend and backend are
+      // deployed on different domains (Vercel + Render) — this is a
+      // genuinely cross-site relationship, not just cross-subdomain.
+      // SameSite=Strict (the previous setting) silently stops the browser
+      // from ever sending this cookie back to the backend, and no amount
+      // of frontend fixing can work around that. SameSite=None requires
+      // Secure, so `secure` is hardcoded true rather than tied to
+      // NODE_ENV — this cookie is never valid to send over plain HTTP.
+      secure: true,
+      sameSite: 'none',
       maxAge: 24 * 60 * 60 * 1000,
       path: '/',
     });
