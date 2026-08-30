@@ -11,6 +11,7 @@ import db, { initDb } from './db.js';
 import { logger } from './logger.js';
 import { initErrorTracking, captureError, sendAlert } from './monitoring.js';
 import { recordRequest, loadPersistedValues, persistStats } from './stats.js';
+import { startCleanupScheduler } from './jobs/cleanup.js';
 
 import { attachCspNonce, helmetMiddleware } from './middleware/helmetConfig.js';
 import { setCsrfCookie, verifyCsrfToken } from './middleware/csrf.js';
@@ -163,10 +164,12 @@ async function startServer() {
   });
 
   const statsInterval = setInterval(persistStats, 10_000);
+  const cleanupInterval = startCleanupScheduler();
 
   async function shutdown(signal) {
     logger.info(`${signal} received, shutting down gracefully`);
     clearInterval(statsInterval);
+    clearInterval(cleanupInterval);
     await persistStats();
     server.close(async () => {
       await db.end().catch(() => {});
