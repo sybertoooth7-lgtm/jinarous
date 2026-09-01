@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router';
 import HomePage from './pages/HomePage';
 import ClientLogin from './pages/ClientLogin';
 import ClientDashboard from './pages/ClientDashboard';
+import VerifyEmail from './pages/VerifyEmail';
 import VerifyScore from './pages/VerifyScore';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
@@ -25,6 +26,7 @@ function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/client/login" element={<ClientLogin />} />
       <Route path="/client/dashboard" element={<ClientDashboard />} />
+      <Route path="/client/verify-email" element={<VerifyEmail />} />
       <Route path="/verify/:token" element={<VerifyScore />} />
       <Route path="/privacy-policy" element={<PrivacyPolicy />} />
       <Route path="/terms-of-service" element={<TermsOfService />} />
