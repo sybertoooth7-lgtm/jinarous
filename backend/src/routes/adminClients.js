@@ -191,13 +191,10 @@ router.patch('/:id/compliance/:itemId', [
       [req.params.id, req.params.itemId]
     );
     const result = await db.query(
-      `INSERT INTO client_compliance_status (client_id, item_id, status, notes, updated_by, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
-       ON CONFLICT (client_id, item_id)
-       DO UPDATE SET status = EXCLUDED.status, notes = EXCLUDED.notes,
-                     updated_by = EXCLUDED.updated_by, updated_at = NOW()
-       RETURNING *`,
-      [req.params.id, req.params.itemId, status, notes, adminEmail]
+      `INSERT INTO clients (company_name, email, password_hash, email_verified)
+       VALUES ($1, $2, $3, TRUE)
+       RETURNING id, company_name, email, created_at`,
+      [companyName, email, passwordHash]
     );
     await recordAuditLog({
       adminEmail,
