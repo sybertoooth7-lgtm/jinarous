@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useSearchParams, Link, useNavigate } from 'react-router';
+import { useParams, Link, useNavigate } from 'react-router';
 import { secureFetch, isHoneypotTriggered } from '@/lib/security';
 import { SecurityHoneypot } from '@/components/SecurityHoneypot';
 
@@ -7,8 +7,7 @@ type VerifyStatus = 'loading' | 'success' | 'error';
 type ResendStatus = 'idle' | 'sending' | 'sent';
 
 export default function VerifyEmail() {
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get('token');
+  const { token } = useParams();
   const navigate = useNavigate();
 
   const [status, setStatus] = useState<VerifyStatus>('loading');
