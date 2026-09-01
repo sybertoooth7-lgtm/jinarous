@@ -30,9 +30,9 @@ function App() {
       <Route path="/client/login" element={<ClientLogin />} />
       <Route path="/client/signup" element={<ClientSignup />} />
       <Route path="/client/forgot-password" element={<ForgotPassword />} />
-      <Route path="/client/reset-password" element={<ResetPassword />} />
+      <Route path="/client/reset-password/:token" element={<ResetPassword />} />
       <Route path="/client/dashboard" element={<ClientDashboard />} />
-      <Route path="/client/verify-email" element={<VerifyEmail />} />
+      <Route path="/client/verify-email/:token" element={<VerifyEmail />} />
       <Route path="/verify/:token" element={<VerifyScore />} />
       <Route path="/privacy-policy" element={<PrivacyPolicy />} />
       <Route path="/terms-of-service" element={<TermsOfService />} />
