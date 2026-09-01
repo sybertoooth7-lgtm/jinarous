@@ -1,9 +1,12 @@
 import { Routes, Route } from 'react-router';
 import HomePage from './pages/HomePage';
 import ClientLogin from './pages/ClientLogin';
+import ClientSignup from './pages/ClientSignup';
 import ClientDashboard from './pages/ClientDashboard';
 import VerifyEmail from './pages/VerifyEmail';
 import VerifyScore from './pages/VerifyScore';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import SecurityPolicy from './pages/SecurityPolicy';
@@ -25,6 +28,9 @@ function App() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/client/login" element={<ClientLogin />} />
+      <Route path="/client/signup" element={<ClientSignup />} />
+      <Route path="/client/forgot-password" element={<ForgotPassword />} />
+      <Route path="/client/reset-password" element={<ResetPassword />} />
       <Route path="/client/dashboard" element={<ClientDashboard />} />
       <Route path="/client/verify-email" element={<VerifyEmail />} />
       <Route path="/verify/:token" element={<VerifyScore />} />
