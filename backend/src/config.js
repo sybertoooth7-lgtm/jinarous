@@ -74,6 +74,17 @@ if (isProduction && process.env.DB_SSL === 'false') {
   warnings.push('DB_SSL is set to false in production. Database traffic will be unencrypted.');
 }
 
+// Used to build the links inside verification/password-reset emails
+// (see buildLink() in clientAuth.js) and to pin those links' hostname in
+// lib/email.js's isSafeLink() check. Not fatal if unset — those emails
+// already no-op without RESEND_API_KEY/FROM_EMAIL — but a loud warning is
+// worth it since a missing value means every such email silently contains
+// no working link, or gets silently refused by isSafeLink.
+const frontendUrl = (process.env.FRONTEND_URL || '').replace(/\/+$/, '');
+if (isProduction && !frontendUrl) {
+  warnings.push('FRONTEND_URL is not set. Verification and password-reset emails cannot include a working link.');
+}
+
 if (warnings.length > 0) {
   console.warn('[config] Security warnings:');
   warnings.forEach(w => console.warn(`  - ${w}`));
@@ -93,6 +104,7 @@ export const config = {
   cookieSecret,
   mfaEncryptionKey,
   corsOrigins,
+  frontendUrl,
   adminBootstrapEmail: process.env.ADMIN_BOOTSTRAP_EMAIL,
   adminBootstrapPassword: process.env.ADMIN_BOOTSTRAP_PASSWORD,
   dbSsl: isProduction && process.env.DB_SSL !== 'false',
