@@ -72,21 +72,13 @@ const asyncHandler = (fn) => (req, res, next) => {
 };
 
 // ── Transaction Helper ────────────────────────────────────────────────────
-// CRITICAL: Always use a dedicated client for multi-statement transactions.
-// Using db.query('BEGIN') on a Pool sends each statement to a random connection.
+// db is this app's query wrapper (see db.js) — it has .query()/.exec()/
+// .transaction()/.end(), not a raw pg.Pool, so it has no .connect(). It
+// already implements exactly this BEGIN/COMMIT/ROLLBACK-with-dedicated-
+// client pattern via db.transaction(); delegate to that instead of
+// reimplementing it against an API this db module doesn't expose.
 async function withTransaction(callback) {
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await callback(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw err;
-  } finally {
-    client.release();
-  }
+  return db.transaction(callback);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -231,7 +223,7 @@ async function revokeAllSessions(conn, clientId) {
   await Promise.all([
     conn.query(
       `INSERT INTO token_blocklist (jti, expires_at)
-       SELECT * FROM UNNEST($1::text[], $2::timestamptz[])
+       SELECT * FROM UNNEST($1::uuid[], $2::timestamptz[])
        ON CONFLICT (jti) DO NOTHING`,
       [jtis, jtis.map((jti) => expiryMap.get(jti))]
     ),
@@ -282,7 +274,7 @@ router.post(
 
         sendVerificationEmail({
           email,
-          link: buildLink('/verify-email', rawToken),
+          link: buildLink('/client/verify-email', rawToken),
         }).catch((err) => console.error('[clientAuth] Verification email failed:', err));
       });
 
@@ -349,7 +341,7 @@ router.post(
 
       sendVerificationEmail({
         email,
-        link: buildLink('/verify-email', rawToken),
+        link: buildLink('/client/verify-email', rawToken),
       }).catch((err) => console.error('[clientAuth] Resend verification email failed:', err));
     });
 
@@ -382,7 +374,7 @@ router.post(
 
       sendPasswordResetEmail({
         email,
-        link: buildLink('/reset-password', rawToken),
+        link: buildLink('/client/reset-password', rawToken),
       }).catch((err) => console.error('[clientAuth] Password-reset email failed:', err));
     });
 
