@@ -47,3 +47,20 @@ export const contactLimiter = rateLimit({
     res.status(429).json({ error: 'Too many submissions, please try again later.' });
   },
 });
+
+
+// Signup / password-reset / resend-verification — separate budget from login
+export const signupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new PostgresRateLimitStore(),
+  keyGenerator: (req) => `signup:${ipKeyGenerator(req.ip)}`,
+  handler: (req, res) => {
+    res.status(429).json({
+      error: 'Too many signup attempts, please try again later.',
+      retryAfter: 60 * 60,
+    });
+  },
+});
