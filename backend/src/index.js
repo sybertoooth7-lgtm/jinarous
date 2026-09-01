@@ -16,7 +16,7 @@ import { startCleanupScheduler } from './jobs/cleanup.js';
 import { attachCspNonce, helmetMiddleware } from './middleware/helmetConfig.js';
 import { setCsrfCookie, verifyCsrfToken } from './middleware/csrf.js';
 import { shield } from './middleware/shieldMiddleware.js';
-import { limiter, authLimiter } from './middleware/rate-limit.js';
+import { limiter, authLimiter, signupLimiter } from './middleware/rate-limit.js';
 import { verifyLimiter } from './middleware/verify-rate-limit.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireClientAuth } from './middleware/clientAuth.js';
@@ -107,7 +107,7 @@ async function startServer() {
   // on vercel.app, full stop, regardless of any cookie flags. This route
   // is how the frontend gets the current token instead: a GET request
   // (safe method, no CSRF check needed) that echoes back whatever
-  // setCsrfCookie already put on req.csrfToken above.
+  // setCsCookie already put on req.csrfToken above.
   app.get('/api/csrf-token', (req, res) => {
     res.json({ csrfToken: req.csrfToken });
   });
@@ -119,6 +119,10 @@ async function startServer() {
   app.use('/api/admin/login', authLimiter);
   app.use('/api/client/login', authLimiter);
   app.use('/api/verify', verifyLimiter);
+
+  app.use('/api/client/signup', signupLimiter);
+  app.use('/api/client/resend-verification', signupLimiter);
+  app.use('/api/client/password-reset/request', signupLimiter);
 
   // Public / readonly-safe admin routes
   app.use('/api/admin', adminRoutes);
