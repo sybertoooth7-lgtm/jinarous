@@ -33,9 +33,12 @@ router.post('/', [
 
   try {
     const passwordHash = await bcrypt.hash(tempPassword, 12);
+    // email_verified=TRUE: an admin is vouching for this client directly,
+    // so there's no verification-email step for them to complete — they
+    // must be able to log in with the temp password the admin hands them.
     const result = await db.query(
-      `INSERT INTO clients (company_name, email, password_hash)
-       VALUES ($1, $2, $3)
+      `INSERT INTO clients (company_name, email, password_hash, email_verified)
+       VALUES ($1, $2, $3, TRUE)
        RETURNING id, company_name, email, created_at`,
       [companyName, email, passwordHash]
     );
@@ -191,10 +194,13 @@ router.patch('/:id/compliance/:itemId', [
       [req.params.id, req.params.itemId]
     );
     const result = await db.query(
-      `INSERT INTO clients (company_name, email, password_hash, email_verified)
-       VALUES ($1, $2, $3, TRUE)
-       RETURNING id, company_name, email, created_at`,
-      [companyName, email, passwordHash]
+      `INSERT INTO client_compliance_status (client_id, item_id, status, notes, updated_by, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW())
+       ON CONFLICT (client_id, item_id)
+       DO UPDATE SET status = EXCLUDED.status, notes = EXCLUDED.notes,
+                      updated_by = EXCLUDED.updated_by, updated_at = NOW()
+       RETURNING client_id, item_id, status, notes, updated_by, updated_at`,
+      [req.params.id, req.params.itemId, status, notes, adminEmail]
     );
     await recordAuditLog({
       adminEmail,
