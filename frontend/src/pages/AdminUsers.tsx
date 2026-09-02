@@ -32,7 +32,26 @@ export default function AdminUsers() {
     }
   }
 
-  useEffect(() => { loadUsers(); }, []);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await secureFetch('/api/admin/users');
+        if (!res.ok) throw new Error('Failed to load users');
+        const data = await res.json();
+        if (!mounted) return;
+        setUsers(data.users);
+      } catch (err) {
+        if (!mounted) return;
+        setError(err instanceof Error ? err.message : 'Failed to load');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   async function createUser(e: React.FormEvent) {
     e.preventDefault();
@@ -109,7 +128,7 @@ export default function AdminUsers() {
           <label className="text-xs text-white/40 block mb-1">Role</label>
           <select
             value={newRole}
-            onChange={(e) => setNewRole(e.target.value as any)}
+            onChange={(e) => setNewRole(e.target.value as 'readonly' | 'admin' | 'superadmin')}
             className="bg-navy-base border border-white/15 rounded-lg px-3 py-2 text-white text-sm"
           >
             <option value="readonly">Read-only</option>
