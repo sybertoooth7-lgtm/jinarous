@@ -19,5 +19,19 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    // shadcn/ui-generated components (components.json) — these files pair a
+    // component export with a cva()/utility export in the same file by
+    // shadcn's own convention, which is exactly what react-refresh/only-
+    // export-components flags. Not app code we hand-edit; every shadcn
+    // project hits this on these same generated files.
+    files: ['src/components/ui/**/*.{ts,tsx}'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
   },
 ])
