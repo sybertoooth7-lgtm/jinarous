@@ -23,11 +23,18 @@ function escapeHtml(str) {
 // verification/reset email the moment the app is deployed to a different
 // domain (a previous version of this check hardcoded 'jinarous.vercel.app'
 // and would have done exactly that).
+//
+// https: is required in production. In non-production (FRONTEND_URL like
+// http://localhost:3000), http: is also allowed — otherwise this check
+// fails before sendVerificationEmail()/sendPasswordResetEmail() ever reach
+// their "RESEND_API_KEY not set, link would be: ..." dev-mode fallback log,
+// so local testing could never see the real link at all.
 function isSafeLink(link) {
   try {
     const configuredHost = new URL(config.frontendUrl || '').hostname;
     const url = new URL(link);
-    return url.protocol === 'https:' && !!configuredHost && url.hostname === configuredHost;
+    const protocolOk = config.isProduction ? url.protocol === 'https:' : /^https?:$/.test(url.protocol);
+    return protocolOk && !!configuredHost && url.hostname === configuredHost;
   } catch {
     return false;
   }
