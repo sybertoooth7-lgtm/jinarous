@@ -6,17 +6,15 @@ export default function ResetPassword() {
   const { token } = useParams();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(() => (token ? '' : 'Invalid or missing reset token.'));
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-focus first field and validate token presence
+  // Auto-focus first field once a token is present
   useEffect(() => {
-    if (!token) {
-      setError('Invalid or missing reset token.');
-    } else {
+    if (token) {
       passwordInputRef.current?.focus();
     }
   }, [token]);
