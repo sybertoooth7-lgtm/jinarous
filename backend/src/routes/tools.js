@@ -17,7 +17,7 @@ router.post(
     body('loginPath')
       .optional({ checkFalsy: true })
       .trim()
-      .matches(/^[a-zA-Z0-9_\-\/.]*$/)
+      .matches(/^[a-zA-Z0-9_\-/.]*$/)
       .withMessage('Invalid login path.'),
   ],
   async (req, res) => {
