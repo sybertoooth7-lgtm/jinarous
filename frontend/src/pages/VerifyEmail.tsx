@@ -10,8 +10,10 @@ export default function VerifyEmail() {
   const { token } = useParams();
   const navigate = useNavigate();
 
-  const [status, setStatus] = useState<VerifyStatus>('loading');
-  const [message, setMessage] = useState('');
+  const [status, setStatus] = useState<VerifyStatus>(() => (token ? 'loading' : 'error'));
+  const [message, setMessage] = useState(() =>
+    token ? '' : 'No verification token found in the URL.'
+  );
   const [resendEmail, setResendEmail] = useState('');
   const [resendStatus, setResendStatus] = useState<ResendStatus>('idle');
   const [countdown, setCountdown] = useState(3);
@@ -56,13 +58,9 @@ export default function VerifyEmail() {
 
   // Verify token on mount
   useEffect(() => {
-    let mounted = true;
+    if (!token) return;
 
-    if (!token) {
-      setStatus('error');
-      setMessage('No verification token found in the URL.');
-      return;
-    }
+    let mounted = true;
 
     async function verify() {
       try {
