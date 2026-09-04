@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { body, param, validationResult } from 'express-validator';
+import { body, param, query, validationResult, matchedData } from 'express-validator';
 import db from '../db.js';
 import { recordAuditLog } from '../middleware/auditLog.js';
 
@@ -69,15 +69,38 @@ router.post('/', [
 });
 
 /**
- * GET /api/admin/clients
- * Lists all clients.
+ * GET /api/admin/clients?page=1&limit=25
  */
-router.get('/', async (req, res) => {
+router.get('/', [
+  query('page').optional().isInt({ min: 1 }).toInt(),
+  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const data = matchedData(req);
+  const page = data.page || 1;
+  const limit = data.limit || 25;
+  const offset = (page - 1) * limit;
+
   try {
+    const countResult = await db.query('SELECT COUNT(*) FROM clients');
+    const total = parseInt(countResult.rows[0].count, 10);
+
     const result = await db.query(
-      'SELECT id, company_name, email, created_at FROM clients ORDER BY created_at DESC'
+      `SELECT id, company_name, email, created_at FROM clients
+       ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+      [limit, offset]
     );
-    res.json({ clients: result.rows });
+    res.json({
+      clients: result.rows,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (err) {
     console.error('[adminClients] Failed to list clients:', err.message);
     res.status(500).json({ error: 'Internal server error' });
