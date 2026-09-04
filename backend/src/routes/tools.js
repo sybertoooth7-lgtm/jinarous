@@ -56,14 +56,20 @@ router.post(
 );
 
 router.get('/runs', requireAuth, async (req, res) => {
-  const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
+  const offset = (page - 1) * limit;
+
   try {
+    const countResult = await db.query('SELECT COUNT(*) FROM tool_runs');
+    const total = parseInt(countResult.rows[0].count, 10);
+
     const { rows } = await db.query(
       `SELECT id, tool, target, status, summary_json, run_by, created_at
-       FROM tool_runs ORDER BY created_at DESC LIMIT $1`,
-      [limit]
+       FROM tool_runs ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
+      [limit, offset]
     );
-    res.json({ runs: rows });
+    res.json({ runs: rows, total, page, limit, totalPages: Math.ceil(total / limit) });
   } catch (err) {
     console.error('[tools] Failed to list runs:', err.message);
     res.status(500).json({ error: 'Internal server error' });
