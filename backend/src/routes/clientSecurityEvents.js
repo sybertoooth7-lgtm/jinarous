@@ -27,16 +27,24 @@ function maskIp(ip) {
 }
 
 router.get('/', async (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+  const offset = (page - 1) * limit;
 
   try {
+    const countResult = await db.query(
+      'SELECT COUNT(*) FROM client_login_attempts WHERE client_id = $1',
+      [req.client.sub]
+    );
+    const total = parseInt(countResult.rows[0].count, 10);
+
     const result = await db.query(
       `SELECT ip_address, success, created_at
        FROM client_login_attempts
        WHERE client_id = $1
        ORDER BY created_at DESC
-       LIMIT $2`,
-      [req.client.sub, limit]
+       LIMIT $2 OFFSET $3`,
+      [req.client.sub, limit, offset]
     );
 
     const events = result.rows.map((row) => ({
@@ -45,9 +53,11 @@ router.get('/', async (req, res) => {
       createdAt: row.created_at,
     }));
 
+    // failedCount is scoped to this page's rows, same as before — a
+    // full-history failed count would need a separate aggregate query.
     const failedCount = events.filter((e) => !e.success).length;
 
-    res.json({ events, failedCount, totalCount: events.length });
+    res.json({ events, failedCount, total, page, limit, totalPages: Math.ceil(total / limit) });
   } catch (err) {
     console.error('[clientSecurityEvents] Failed to fetch login history:', err.message);
     res.status(500).json({ error: 'Internal server error' });
