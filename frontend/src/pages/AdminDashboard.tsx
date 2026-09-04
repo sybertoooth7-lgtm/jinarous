@@ -1,0 +1,311 @@
+// frontend/src/pages/AdminDashboard.tsx
+// Landing page after admin login. Three sections: platform-wide compliance
+// overview, a paginated client list (with risk scores), and a paginated
+// security events table.
+
+import { useEffect, useState } from 'react';
+import { API_BASE } from '@/lib/api';
+import AdminLayout from '@/components/AdminLayout';
+
+interface ComplianceOverview {
+  totalClients: number;
+  avgScore: number | null;
+  bandCounts: Record<string, number>;
+}
+
+interface ClientRow {
+  id: number;
+  company_name: string;
+  email: string;
+  created_at: string;
+  score: number | null;
+  itemCount: number;
+}
+
+interface SecurityEventRow {
+  id: number;
+  ip_address: string;
+  event_type: string;
+  severity: 'low' | 'medium' | 'high';
+  request_path: string | null;
+  blocked: boolean;
+  created_at: string;
+}
+
+const BAND_STYLES: Record<string, string> = {
+  Strong: 'bg-alux-green/15 text-alux-green',
+  Adequate: 'bg-alux-cyan/15 text-alux-cyan',
+  Developing: 'bg-alux-gold/15 text-alux-gold',
+  'Needs attention': 'bg-alux-red/15 text-alux-red',
+  'Not yet assessed': 'bg-white/10 text-white/50',
+};
+
+const SEVERITY_STYLES: Record<string, string> = {
+  high: 'bg-alux-red/15 text-alux-red',
+  medium: 'bg-alux-gold/15 text-alux-gold',
+  low: 'bg-white/10 text-white/50',
+};
+
+function PageControls({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-end gap-3 mt-4">
+      <button
+        onClick={() => onChange(page - 1)}
+        disabled={page <= 1}
+        className="text-xs text-white/60 hover:text-white border border-white/15 rounded-lg px-3 py-1.5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        Previous
+      </button>
+      <span className="text-xs text-white/40">
+        Page {page} of {totalPages}
+      </span>
+      <button
+        onClick={() => onChange(page + 1)}
+        disabled={page >= totalPages}
+        className="text-xs text-white/60 hover:text-white border border-white/15 rounded-lg px-3 py-1.5 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+      >
+        Next
+      </button>
+    </div>
+  );
+}
+
+export default function AdminDashboard() {
+  const [overview, setOverview] = useState<ComplianceOverview | null>(null);
+  const [overviewError, setOverviewError] = useState('');
+
+  const [clients, setClients] = useState<ClientRow[]>([]);
+  const [clientsPage, setClientsPage] = useState(1);
+  const [clientsTotalPages, setClientsTotalPages] = useState(1);
+  const [clientsLoading, setClientsLoading] = useState(true);
+  const [clientsError, setClientsError] = useState('');
+
+  const [events, setEvents] = useState<SecurityEventRow[]>([]);
+  const [eventsPage, setEventsPage] = useState(1);
+  const [eventsTotalPages, setEventsTotalPages] = useState(1);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsError, setEventsError] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/admin/compliance-overview`, {
+          credentials: 'include',
+        });
+        if (!res.ok) throw new Error('Failed to load compliance overview.');
+        setOverview(await res.json());
+      } catch (err) {
+        setOverviewError(err instanceof Error ? err.message : 'Something went wrong.');
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setClientsLoading(true);
+      setClientsError('');
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/admin/clients?page=${clientsPage}&limit=10&includeScore=true`,
+          { credentials: 'include' }
+        );
+        if (!res.ok) throw new Error('Failed to load clients.');
+        const data = await res.json();
+        if (!mounted) return;
+        setClients(data.clients);
+        setClientsTotalPages(data.totalPages || 1);
+      } catch (err) {
+        if (!mounted) return;
+        setClientsError(err instanceof Error ? err.message : 'Something went wrong.');
+      } finally {
+        if (mounted) setClientsLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [clientsPage]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setEventsLoading(true);
+      setEventsError('');
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/admin/security/events?page=${eventsPage}&limit=10`,
+          { credentials: 'include' }
+        );
+        if (!res.ok) throw new Error('Failed to load security events.');
+        const data = await res.json();
+        if (!mounted) return;
+        setEvents(data.events);
+        setEventsTotalPages(data.totalPages || 1);
+      } catch (err) {
+        if (!mounted) return;
+        setEventsError(err instanceof Error ? err.message : 'Something went wrong.');
+      } finally {
+        if (mounted) setEventsLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [eventsPage]);
+
+  return (
+    <AdminLayout>
+      {() => (
+        <div className="max-w-6xl mx-auto px-6 py-10 space-y-12">
+          {/* Compliance overview */}
+          <section>
+            <h2 className="font-serif text-lg text-alux-gold mb-4">Compliance Overview</h2>
+            {overviewError && <p className="text-alux-red text-sm">{overviewError}</p>}
+            {overview && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div className="bg-navy-surface border border-white/10 rounded-xl p-4">
+                  <p className="text-xs text-white/40 mb-1">Total clients</p>
+                  <p className="text-2xl font-bold font-mono">{overview.totalClients}</p>
+                </div>
+                <div className="bg-navy-surface border border-white/10 rounded-xl p-4">
+                  <p className="text-xs text-white/40 mb-1">Average score</p>
+                  <p className="text-2xl font-bold font-mono">
+                    {overview.avgScore !== null ? overview.avgScore : '—'}
+                  </p>
+                </div>
+                {Object.entries(overview.bandCounts).map(([band, count]) => (
+                  <div key={band} className="bg-navy-surface border border-white/10 rounded-xl p-4">
+                    <p className="text-xs text-white/40 mb-1">{band}</p>
+                    <p className={`text-2xl font-bold font-mono ${BAND_STYLES[band]?.split(' ')[1] || ''}`}>
+                      {count}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Client list */}
+          <section>
+            <h2 className="font-serif text-lg text-alux-gold mb-4">Clients</h2>
+            {clientsError && <p className="text-alux-red text-sm mb-3">{clientsError}</p>}
+            {clientsLoading ? (
+              <p className="text-white/50 text-sm">Loading…</p>
+            ) : clients.length === 0 ? (
+              <p className="text-white/50 text-sm">No clients yet.</p>
+            ) : (
+              <div className="bg-navy-surface border border-white/10 rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10 text-left text-white/40 text-xs uppercase tracking-wide">
+                      <th className="px-4 py-3 font-medium">Company</th>
+                      <th className="px-4 py-3 font-medium">Email</th>
+                      <th className="px-4 py-3 font-medium">Score</th>
+                      <th className="px-4 py-3 font-medium">Joined</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clients.map((c) => {
+                      const band =
+                        c.score === null
+                          ? 'Not yet assessed'
+                          : c.score >= 90
+                            ? 'Strong'
+                            : c.score >= 70
+                              ? 'Adequate'
+                              : c.score >= 50
+                                ? 'Developing'
+                                : 'Needs attention';
+                      return (
+                        <tr key={c.id} className="border-b border-white/5 last:border-0">
+                          <td className="px-4 py-3 font-medium">{c.company_name}</td>
+                          <td className="px-4 py-3 text-white/60">{c.email}</td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap ${BAND_STYLES[band]}`}
+                            >
+                              {c.score !== null ? `${c.score} · ${band}` : band}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-white/40">
+                            {new Date(c.created_at).toLocaleDateString()}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <PageControls page={clientsPage} totalPages={clientsTotalPages} onChange={setClientsPage} />
+          </section>
+
+          {/* Security events */}
+          <section>
+            <h2 className="font-serif text-lg text-alux-gold mb-4">Recent Security Events</h2>
+            {eventsError && <p className="text-alux-red text-sm mb-3">{eventsError}</p>}
+            {eventsLoading ? (
+              <p className="text-white/50 text-sm">Loading…</p>
+            ) : events.length === 0 ? (
+              <p className="text-white/50 text-sm">No security events recorded.</p>
+            ) : (
+              <div className="bg-navy-surface border border-white/10 rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10 text-left text-white/40 text-xs uppercase tracking-wide">
+                      <th className="px-4 py-3 font-medium">IP</th>
+                      <th className="px-4 py-3 font-medium">Type</th>
+                      <th className="px-4 py-3 font-medium">Severity</th>
+                      <th className="px-4 py-3 font-medium">Path</th>
+                      <th className="px-4 py-3 font-medium">Blocked</th>
+                      <th className="px-4 py-3 font-medium">When</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {events.map((e) => (
+                      <tr key={e.id} className="border-b border-white/5 last:border-0">
+                        <td className="px-4 py-3 font-mono text-white/70">{e.ip_address}</td>
+                        <td className="px-4 py-3">{e.event_type}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`text-xs font-semibold px-2.5 py-1 rounded-full ${SEVERITY_STYLES[e.severity]}`}
+                          >
+                            {e.severity}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-white/50 font-mono text-xs truncate max-w-[200px]">
+                          {e.request_path || '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          {e.blocked ? (
+                            <span className="text-alux-red text-xs">Blocked</span>
+                          ) : (
+                            <span className="text-white/30 text-xs">Logged only</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-white/40">
+                          {new Date(e.created_at).toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <PageControls page={eventsPage} totalPages={eventsTotalPages} onChange={setEventsPage} />
+          </section>
+        </div>
+      )}
+    </AdminLayout>
+  );
+}
