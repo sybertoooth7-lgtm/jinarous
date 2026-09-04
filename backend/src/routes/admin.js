@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { body, param, query, validationResult } from 'express-validator';
+import { body, param, query, validationResult, matchedData } from 'express-validator';
 import db from '../db.js';
 import { config } from '../config.js';
 import { requireAuth, blocklistToken, isBlocklisted } from '../middleware/auth.js';
@@ -275,10 +275,12 @@ router.get('/submissions', requireAuth, [
     return res.status(400).json({ errors: errors.array() });
   }
 
-  const page = req.query.page || 1;
-  const limit = req.query.limit || 20;
+  const data = matchedData(req);
+  const page = data.page || 1;
+  const limit = data.limit || 20;
   const offset = (page - 1) * limit;
-  const { status, search } = req.query;
+  const status = data.status;
+  const search = data.search;
 
   try {
     let whereClause = 'WHERE 1=1';
