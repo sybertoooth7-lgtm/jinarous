@@ -55,7 +55,7 @@ router.post('/', [
 });
 
 /**
- * GET /api/admin/clients/:id/risk-score-shares
+ * GET /api/admin/clients/:id/risk-score-shares?page=1&limit=25
  * Lists all share links (active and revoked) for this client.
  */
 router.get('/', [
@@ -66,13 +66,30 @@ router.get('/', [
     return res.status(400).json({ errors: errors.array() });
   }
 
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
+  const offset = (page - 1) * limit;
+
   try {
-    const result = await db.query(
-      `SELECT id, token, created_at, expires_at, revoked_at, created_by
-       FROM risk_score_shares WHERE client_id = $1 ORDER BY created_at DESC`,
+    const countResult = await db.query(
+      'SELECT COUNT(*) FROM risk_score_shares WHERE client_id = $1',
       [req.params.id]
     );
-    res.json({ shares: result.rows });
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    const result = await db.query(
+      `SELECT id, token, created_at, expires_at, revoked_at, created_by
+       FROM risk_score_shares WHERE client_id = $1
+       ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+      [req.params.id, limit, offset]
+    );
+    res.json({
+      shares: result.rows,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (err) {
     console.error('[adminRiskScore] Failed to list share links:', err.message);
     res.status(500).json({ error: 'Internal server error' });
