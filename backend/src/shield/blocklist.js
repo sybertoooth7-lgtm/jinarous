@@ -73,14 +73,26 @@ export async function unblockIp(ip) {
 /**
  * Returns currently active blocks, most recent first — useful for an admin endpoint.
  */
-export async function listActiveBlocks(limit = 100) {
+export async function listActiveBlocks(limit = 100, offset = 0) {
   const result = await db.query(
     `SELECT ip_address, reason, severity, blocked_at, expires_at, hit_count
      FROM blocked_ips
      WHERE expires_at IS NULL OR expires_at > NOW()
      ORDER BY blocked_at DESC
-     LIMIT $1`,
-    [limit]
+     LIMIT $1 OFFSET $2`,
+    [limit, offset]
   );
   return result.rows;
+}
+
+/**
+ * Total count of currently active blocks — pairs with listActiveBlocks()
+ * for page-based pagination (limit/offset alone can't tell the caller
+ * how many pages exist).
+ */
+export async function countActiveBlocks() {
+  const result = await db.query(
+    `SELECT COUNT(*) FROM blocked_ips WHERE expires_at IS NULL OR expires_at > NOW()`
+  );
+  return parseInt(result.rows[0].count, 10);
 }
