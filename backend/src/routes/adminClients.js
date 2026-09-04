@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { body, param, query, validationResult, matchedData } from 'express-validator';
 import db from '../db.js';
 import { recordAuditLog } from '../middleware/auditLog.js';
+import { computeRiskScoreBulk } from '../shield/riskScore.js';
 
 const router = Router();
 
@@ -69,11 +70,12 @@ router.post('/', [
 });
 
 /**
- * GET /api/admin/clients?page=1&limit=25
+ * GET /api/admin/clients?page=1&limit=25&includeScore=true
  */
 router.get('/', [
   query('page').optional().isInt({ min: 1 }).toInt(),
   query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  query('includeScore').optional().isBoolean().toBoolean(),
 ], async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -94,8 +96,15 @@ router.get('/', [
        ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
       [limit, offset]
     );
+
+    let clients = result.rows;
+    if (data.includeScore) {
+      const scores = await computeRiskScoreBulk(clients.map((c) => c.id));
+      clients = clients.map((c) => ({ ...c, ...scores.get(c.id) }));
+    }
+
     res.json({
-      clients: result.rows,
+      clients,
       total,
       page,
       limit,
