@@ -10,6 +10,7 @@ import { requireAdmin } from '../middleware/rbac.js';
 import { recordFailedLogin } from '../shield/bruteForceGuard.js';
 import { recordAuditLog } from '../middleware/auditLog.js';
 import { parseExpiryToMs } from '../lib/parseExpiry.js';
+import { computeComplianceOverview } from '../shield/riskScore.js';
 
 const router = Router();
 
@@ -247,7 +248,7 @@ router.post('/logout', requireAuth, async (req, res) => {
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const result = await db.query(
-      'SELECT id, email, created_at FROM admin_users WHERE id = $1',
+      'SELECT id, email, role, created_at FROM admin_users WHERE id = $1',
       [req.user.sub]
     );
     const user = result.rows[0];
@@ -257,6 +258,22 @@ router.get('/me', requireAuth, async (req, res) => {
     res.json({ user });
   } catch (err) {
     console.error('[admin] /me error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/admin/compliance-overview
+ * Platform-wide summary for the admin dashboard: total clients, average
+ * score, and a count of clients per score band. Aggregate-only — never
+ * returns per-client rows, so this stays cheap regardless of client count.
+ */
+router.get('/compliance-overview', requireAuth, async (_req, res) => {
+  try {
+    const overview = await computeComplianceOverview();
+    res.json(overview);
+  } catch (err) {
+    console.error('[admin] /compliance-overview error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
