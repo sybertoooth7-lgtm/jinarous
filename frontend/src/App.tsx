@@ -3,6 +3,9 @@ import HomePage from './pages/HomePage';
 import ClientLogin from './pages/ClientLogin';
 import ClientSignup from './pages/ClientSignup';
 import ClientDashboard from './pages/ClientDashboard';
+import AdminLogin from './pages/AdminLogin';
+import AdminDashboard from './pages/AdminDashboard';
+import AdminUsers from './pages/AdminUsers';
 import VerifyEmail from './pages/VerifyEmail';
 import VerifyScore from './pages/VerifyScore';
 import ForgotPassword from './pages/ForgotPassword';
@@ -33,6 +36,9 @@ function App() {
       <Route path="/client/reset-password/:token" element={<ResetPassword />} />
       <Route path="/client/dashboard" element={<ClientDashboard />} />
       <Route path="/client/verify-email/:token" element={<VerifyEmail />} />
+      <Route path="/admin/login" element={<AdminLogin />} />
+      <Route path="/admin/dashboard" element={<AdminDashboard />} />
+      <Route path="/admin/users" element={<AdminUsers />} />
       <Route path="/verify/:token" element={<VerifyScore />} />
       <Route path="/privacy-policy" element={<PrivacyPolicy />} />
       <Route path="/terms-of-service" element={<TermsOfService />} />
