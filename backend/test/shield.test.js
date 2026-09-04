@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { scanRequest } from '../src/shield/detector.js';
-import { computeRiskScore, scoreLabel } from '../src/shield/riskScore.js';
+import { computeRiskScore, computeRiskScoreBulk, computeComplianceOverview, scoreLabel } from '../src/shield/riskScore.js';
 import { isBlocked, blockIp, unblockIp, listActiveBlocks } from '../src/shield/blocklist.js';
 import { recordFailedLogin, recordRequest } from '../src/shield/bruteForceGuard.js';
 import { logSecurityEvent } from '../src/shield/eventLogger.js';
@@ -163,6 +163,126 @@ describe('shield/riskScore.js', () => {
       expect(scoreLabel(50)).toBe('Developing');
       expect(scoreLabel(49)).toBe('Needs attention');
       expect(scoreLabel(0)).toBe('Needs attention');
+    });
+  });
+
+  describe('computeRiskScoreBulk', () => {
+    it('agrees with computeRiskScore for the same set of clients', async () => {
+      // Two clients with different, deliberately mixed statuses — if the
+      // bulk aggregate query's math ever drifts from the tested per-client
+      // function, this catches it directly rather than trusting the SQL
+      // by inspection alone.
+      const items = (await db.query('SELECT id FROM compliance_items ORDER BY id LIMIT 3')).rows;
+      const [i1, i2, i3] = items;
+
+      const clientA = (
+        await db.query(
+          `INSERT INTO clients (company_name, email, password_hash, email_verified)
+           VALUES ('Bulk A', $1, 'x', TRUE) RETURNING id`,
+          [`bulk-a-${Date.now()}@example.com`]
+        )
+      ).rows[0].id;
+      const clientB = (
+        await db.query(
+          `INSERT INTO clients (company_name, email, password_hash, email_verified)
+           VALUES ('Bulk B', $1, 'x', TRUE) RETURNING id`,
+          [`bulk-b-${Date.now()}@example.com`]
+        )
+      ).rows[0].id;
+
+      await db.query(
+        `INSERT INTO client_compliance_status (client_id, item_id, status) VALUES
+           ($1, $2, 'passing'), ($1, $3, 'failing')`,
+        [clientA, i1.id, i2.id]
+      );
+      await db.query(
+        `INSERT INTO client_compliance_status (client_id, item_id, status) VALUES
+           ($1, $2, 'in_progress'), ($1, $3, 'passing'), ($1, $4, 'not_applicable')`,
+        [clientB, i1.id, i2.id, i3.id]
+      );
+
+      const [expectedA, expectedB] = await Promise.all([
+        computeRiskScore(clientA),
+        computeRiskScore(clientB),
+      ]);
+      const bulk = await computeRiskScoreBulk([clientA, clientB]);
+
+      expect(bulk.get(clientA).score).toBe(expectedA.score);
+      expect(bulk.get(clientA).itemCount).toBe(expectedA.itemCount);
+      expect(bulk.get(clientB).score).toBe(expectedB.score);
+      expect(bulk.get(clientB).itemCount).toBe(expectedB.itemCount);
+    });
+
+    it('returns an empty map for an empty input list', async () => {
+      const result = await computeRiskScoreBulk([]);
+      expect(result.size).toBe(0);
+    });
+
+    it('returns score: null for a client with zero applicable items, matching computeRiskScore', async () => {
+      const clientId = (
+        await db.query(
+          `INSERT INTO clients (company_name, email, password_hash, email_verified)
+           VALUES ('Bulk NA', $1, 'x', TRUE) RETURNING id`,
+          [`bulk-na-${Date.now()}@example.com`]
+        )
+      ).rows[0].id;
+      await db.query(
+        `INSERT INTO client_compliance_status (client_id, item_id, status)
+         SELECT $1, id, 'not_applicable' FROM compliance_items`,
+        [clientId]
+      );
+
+      const single = await computeRiskScore(clientId);
+      const bulk = await computeRiskScoreBulk([clientId]);
+
+      expect(single.score).toBeNull();
+      expect(bulk.get(clientId).score).toBeNull();
+    });
+  });
+
+  describe('computeComplianceOverview', () => {
+    it('band counts sum to totalClients, and avgScore falls within a sane 0-100 range', async () => {
+      // Uses whatever clients already exist in the test DB at this point
+      // in the suite — deliberately not asserting exact counts (those
+      // depend on every earlier test in this file), just structural
+      // correctness of the aggregate.
+      const overview = await computeComplianceOverview();
+
+      const bandSum = Object.values(overview.bandCounts).reduce((a, b) => a + b, 0);
+      expect(bandSum).toBe(overview.totalClients);
+
+      if (overview.avgScore !== null) {
+        expect(overview.avgScore).toBeGreaterThanOrEqual(0);
+        expect(overview.avgScore).toBeLessThanOrEqual(100);
+      }
+    });
+
+    it('a client scoring exactly 100 counts toward Strong', async () => {
+      const item = (await db.query('SELECT id FROM compliance_items LIMIT 1')).rows[0];
+      const clientId = (
+        await db.query(
+          `INSERT INTO clients (company_name, email, password_hash, email_verified)
+           VALUES ('Perfect Score Co', $1, 'x', TRUE) RETURNING id`,
+          [`perfect-${Date.now()}@example.com`]
+        )
+      ).rows[0].id;
+      // Mark every item passing except this client only has one applicable
+      // item marked passing and the rest not_applicable, guaranteeing 100.
+      await db.query(
+        `INSERT INTO client_compliance_status (client_id, item_id, status)
+         SELECT $1, id, 'not_applicable' FROM compliance_items WHERE id != $2`,
+        [clientId, item.id]
+      );
+      await db.query(
+        `INSERT INTO client_compliance_status (client_id, item_id, status) VALUES ($1, $2, 'passing')`,
+        [clientId, item.id]
+      );
+
+      const before = await computeComplianceOverview();
+      // Sanity: this client's own score really is 100 before checking the aggregate reflects it.
+      const own = await computeRiskScore(clientId);
+      expect(own.score).toBe(100);
+      expect(before.bandCounts.Strong).toBeGreaterThanOrEqual(1);
     });
   });
 });
