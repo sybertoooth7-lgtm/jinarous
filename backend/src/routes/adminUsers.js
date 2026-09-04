@@ -3,7 +3,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { body, param, validationResult } from 'express-validator';
+import { body, param, query, validationResult, matchedData } from 'express-validator';
 import db from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireSuperAdmin } from '../middleware/rbac.js';
@@ -11,10 +11,29 @@ import { recordAuditLog } from '../middleware/auditLog.js';
 
 const router = Router();
 
-router.get('/', requireAuth, requireSuperAdmin, async (req, res) => {
+router.get('/', requireAuth, requireSuperAdmin, [
+  query('page').optional().isInt({ min: 1 }).toInt(),
+  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const data = matchedData(req);
+  const page = data.page || 1;
+  const limit = data.limit || 25;
+  const offset = (page - 1) * limit;
+
   try {
-    const { rows } = await db.query('SELECT id, email, role, created_at FROM admin_users ORDER BY created_at DESC');
-    res.json({ users: rows });
+    const countResult = await db.query('SELECT COUNT(*) FROM admin_users');
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    const { rows } = await db.query(
+      'SELECT id, email, role, created_at FROM admin_users ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+      [limit, offset]
+    );
+    res.json({ users: rows, total, page, limit, totalPages: Math.ceil(total / limit) });
   } catch (err) {
     console.error('[adminUsers] List error:', err.message);
     res.status(500).json({ error: 'Internal server error' });
