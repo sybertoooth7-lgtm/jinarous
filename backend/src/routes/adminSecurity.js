@@ -7,20 +7,31 @@
 //   app.use('/admin/security', requireAdminAuth, adminSecurityRoutes);
 
 import { Router } from 'express';
-import { listActiveBlocks, unblockIp } from '../shield/blocklist.js';
+import { listActiveBlocks, countActiveBlocks, unblockIp } from '../shield/blocklist.js';
 import db from '../db.js';
 import { recordAuditLog } from '../middleware/auditLog.js';
 
 const router = Router();
 
 /**
- * GET /admin/security/blocks
+ * GET /admin/security/blocks?page=1&limit=50
  * Lists all currently active (non-expired) IP blocks.
  */
 router.get('/blocks', async (req, res) => {
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+  const offset = (page - 1) * limit;
+
   try {
-    const blocks = await listActiveBlocks();
-    res.json({ count: blocks.length, blocks });
+    const total = await countActiveBlocks();
+    const blocks = await listActiveBlocks(limit, offset);
+    res.json({
+      blocks,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (err) {
     console.error('[admin/security] failed to list blocks:', err.message);
     res.status(500).json({ error: 'Failed to fetch blocks.' });
@@ -50,26 +61,40 @@ router.post('/blocks/:ip/unblock', async (req, res) => {
 });
 
 /**
- * GET /admin/security/events?limit=50&type=sqli
+ * GET /admin/security/events?page=1&limit=50&type=sqli
  * Recent security events (detections + blocks), most recent first.
  * Useful for reviewing what tripped a block before deciding to unblock.
  */
 router.get('/events', async (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+  const offset = (page - 1) * limit;
   const type = req.query.type || null;
 
   try {
-    const result = type
-      ? await db.query(
-          `SELECT * FROM security_events WHERE event_type = $1
-           ORDER BY created_at DESC LIMIT $2`,
-          [type, limit]
-        )
-      : await db.query(
-          `SELECT * FROM security_events ORDER BY created_at DESC LIMIT $1`,
-          [limit]
-        );
-    res.json({ count: result.rows.length, events: result.rows });
+    const whereClause = type ? 'WHERE event_type = $1' : '';
+    const countParams = type ? [type] : [];
+    const countResult = await db.query(
+      `SELECT COUNT(*) FROM security_events ${whereClause}`,
+      countParams
+    );
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    const dataParams = type ? [type, limit, offset] : [limit, offset];
+    const limitPlaceholder = type ? '$2' : '$1';
+    const offsetPlaceholder = type ? '$3' : '$2';
+    const result = await db.query(
+      `SELECT * FROM security_events ${whereClause}
+       ORDER BY created_at DESC LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`,
+      dataParams
+    );
+    res.json({
+      events: result.rows,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (err) {
     console.error('[admin/security] failed to fetch events:', err.message);
     res.status(500).json({ error: 'Failed to fetch events.' });
