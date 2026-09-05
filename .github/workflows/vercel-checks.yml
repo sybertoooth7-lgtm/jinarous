@@ -10,8 +10,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
 
@@ -24,6 +24,6 @@ jobs:
         if: always()
         uses: vercel/repository-dispatch/actions/status@v1
         with:
-          name: Vercel - sybertoooth7-lgtm-jinarous: lint
+          name: "Vercel - sybertoooth7-lgtm-jinarous: lint"
           status: ${{ job.status == 'success' && 'success' || 'failure' }}
           token: ${{ secrets.VERCEL_TOKEN }}
