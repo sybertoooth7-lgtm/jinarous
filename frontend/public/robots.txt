@@ -1,0 +1,12 @@
+User-agent: *
+# Authenticated app areas — nothing here is useful to index, and admin
+# paths shouldn't be discoverable via search at all.
+Disallow: /admin/
+Disallow: /client/dashboard
+# Single-use tokenized links (email verification, password reset, shared
+# risk-score verification) — never meant to be crawled or indexed.
+Disallow: /client/verify-email/
+Disallow: /client/reset-password/
+Disallow: /verify/
+
+Sitemap: https://jinarous.vercel.app/sitemap.xml
