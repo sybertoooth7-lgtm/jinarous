@@ -74,6 +74,8 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
 
   const navLinks = [
     { to: '/admin/dashboard', label: 'Dashboard' },
+    { to: '/admin/submissions', label: 'Submissions' },
+    { to: '/admin/security', label: 'Security' },
     ...(admin.role === 'superadmin' ? [{ to: '/admin/users', label: 'Users' }] : []),
   ];
 
