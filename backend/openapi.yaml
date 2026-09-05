@@ -1,0 +1,758 @@
+openapi: 3.1.0
+info:
+  title: Alux Plaza API — Public & Client Endpoints
+  version: "1.0.0"
+  description: |
+    Public and client-facing endpoints for Alux Plaza, a standards-based
+    cybersecurity consultancy platform for SMEs in East Africa (NIST SP
+    800-61, PCI DSS, Kenya Data Protection Act 2019).
+
+    This document covers only the **public** and **client-authenticated**
+    surface — the marketing site's contact form, client signup/login/
+    account-management, and the public score-verification link. Admin-only
+    endpoints (`/api/admin/*`) are intentionally out of scope here.
+
+    ## Authentication
+    Client-authenticated endpoints use an httpOnly `clientToken` session
+    cookie, set by `POST /api/client/login`. There is no bearer-token
+    option — the cookie is the only supported credential.
+
+    ## CSRF
+    Every state-changing request (`POST`) must include an `x-csrf-token`
+    header matching the token returned by `GET /api/csrf-token`, which
+    also sets the paired CSRF cookie. Fetch that endpoint once per session
+    before the first `POST`. Safe methods (`GET`) never require it.
+
+    ## Rate limiting
+    Several endpoints carry tighter limits than the general API (see each
+    operation's description): login attempts, signup, and password-reset
+    requests are all throttled beyond the general per-IP limit to slow
+    down credential-stuffing and account-enumeration attempts. A `429`
+    response is returned once a limit is hit.
+  contact:
+    name: Alux Plaza
+servers:
+  - url: https://api.alux-plaza.example/api
+    description: Production (placeholder — replace with the real Render URL)
+  - url: http://localhost:3001/api
+    description: Local development
+
+tags:
+  - name: Public
+    description: No authentication required.
+  - name: Client Auth
+    description: Account creation, sign-in, and credential recovery.
+  - name: Client Account
+    description: Requires an active client session (clientToken cookie).
+
+security: []
+
+paths:
+  /csrf-token:
+    get:
+      tags: [Public]
+      summary: Get a CSRF token
+      description: >
+        Call once per session before any POST request. Also sets the
+        paired CSRF cookie the server checks the header against.
+      responses:
+        "200":
+          description: A fresh CSRF token.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  csrfToken:
+                    type: string
+                example:
+                  csrfToken: "dmwL2FJpNtJEtD5E-7oTnHNenUf11Ow9Id0JSl-loco"
+
+  /health:
+    get:
+      tags: [Public]
+      summary: Health check
+      description: >
+        Cached for 5 seconds server-side to prevent aggressive polling
+        from exhausting the database connection pool.
+      responses:
+        "200":
+          description: Service and database are healthy.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+        "503":
+          description: Database is unreachable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+
+  /status:
+    get:
+      tags: [Public]
+      summary: Legacy server statistics
+      description: Kept for backward compatibility — prefer `/status/defense-matrix`.
+      responses:
+        "200":
+          description: Server statistics.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  uptime: { type: integer, description: Seconds since server start }
+                  requestsPerSecond: { type: string }
+                  averageLatencyMs: { type: string }
+                  totalRequests: { type: integer }
+                  totalErrors: { type: integer }
+                  autoResponseRate: { type: string }
+                  honeypotBlocked: { type: integer }
+                  serverStartTime: { type: integer, description: Unix ms timestamp }
+
+  /status/defense-matrix:
+    get:
+      tags: [Public]
+      summary: Live defense statistics for the public-facing "defense matrix" display
+      responses:
+        "200":
+          description: Aggregate request/error/contact statistics.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestCount: { type: integer }
+                  errorCount: { type: integer }
+                  averageLatencyMs:
+                    type: [number, "null"]
+                  requestsPerSecond: { type: number }
+                  uptimeSeconds: { type: integer }
+                  contactSuccessRate:
+                    type: [number, "null"]
+                    description: Percentage of contact submissions that succeeded, or null if none yet.
+                  honeypotBlocked: { type: integer }
+
+  /verify/{token}:
+    get:
+      tags: [Public]
+      summary: Verify a shared risk-score link
+      description: >
+        Anyone holding a valid share token (e.g. a bank or insurer the
+        client shared the link with) can confirm a score exists and see
+        the score, label, company name, and issue date. No checklist
+        detail, framework breakdown, or client contact info is exposed.
+        Rate-limited more tightly than the general API.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string, minLength: 10, maxLength: 64 }
+      responses:
+        "200":
+          description: The share link is valid; score details follow.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  companyName: { type: string }
+                  score: { type: [integer, "null"] }
+                  label: { $ref: "#/components/schemas/ScoreLabel" }
+                  issuedAt: { type: string, format: date-time }
+                  verifiedAt: { type: string, format: date-time }
+                  verifiedBy: { type: string, example: "Alux Plaza" }
+        "400":
+          description: Malformed token.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "404":
+          description: No share link matches this token.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "410":
+          description: The link has been revoked or has expired.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /contact:
+    post:
+      tags: [Public]
+      summary: Submit the marketing-site contact form
+      description: >
+        Includes an invisible honeypot field (`honeypot` and/or
+        `website_url`) — if either is filled in, the request is silently
+        accepted with `200` (not `400`) to avoid revealing the detection
+        logic to bots, but nothing is stored. Rate-limited beyond the
+        general API limit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, message]
+              properties:
+                name: { type: string, maxLength: 100 }
+                email: { type: string, format: email, maxLength: 255 }
+                company: { type: string, maxLength: 150 }
+                message: { type: string, maxLength: 5000 }
+                honeypot:
+                  type: string
+                  description: Leave empty. Any value silently discards the submission.
+                website_url:
+                  type: string
+                  description: Leave empty. Any value silently discards the submission.
+      responses:
+        "201":
+          description: Message received.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  id: { type: integer }
+        "200":
+          description: >
+            Honeypot triggered — request accepted but nothing was stored.
+            Indistinguishable from a real success on purpose.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+        "400":
+          description: Validation failed.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/ValidationError" } }
+        "429":
+          description: Rate limit exceeded.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/signup:
+    post:
+      tags: [Client Auth]
+      summary: Create a client account
+      description: >
+        The response is deliberately identical whether or not the email is
+        already registered, to resist account enumeration. A verification
+        email is sent; the account cannot log in until verified. Rate-
+        limited beyond the general API limit. Requires a valid CSRF token.
+      security: [{ csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [companyName, email, password]
+              properties:
+                companyName:
+                  type: string
+                  maxLength: 100
+                  description: Letters, numbers, spaces, and &'’-.,  only.
+                email: { type: string, format: email, maxLength: 254 }
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                honeypot:
+                  type: string
+                  description: Leave empty.
+                website_url:
+                  type: string
+                  description: Leave empty.
+      responses:
+        "200":
+          description: >
+            Enumeration-resistant success — shown whether or not the
+            email was already registered.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "If this email is not already registered, a verification link has been sent."
+        "400":
+          description: Validation failed, or the honeypot was triggered.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/ValidationError" } }
+        "403":
+          description: Missing or invalid CSRF token.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "429":
+          description: Rate limit exceeded.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/verify-email:
+    post:
+      tags: [Client Auth]
+      summary: Verify an email address
+      description: Single-use, time-limited token from the verification email link.
+      security: [{ csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, maxLength: 64 }
+      responses:
+        "200":
+          description: Email verified — the account can now log in.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string }
+        "400":
+          description: Token is unknown, already used, or expired.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "403":
+          description: Missing or invalid CSRF token.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/resend-verification:
+    post:
+      tags: [Client Auth]
+      summary: Resend the verification email
+      description: >
+        Enumeration-resistant: always returns `200` regardless of whether
+        the email exists or is already verified. If the account is
+        unverified, any previously-issued token is invalidated and a new
+        one is issued. Rate-limited beyond the general API limit.
+      security: [{ csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+      responses:
+        "200":
+          description: Enumeration-resistant success, regardless of account state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "If this account exists and is unverified, a new link has been sent."
+        "403":
+          description: Missing or invalid CSRF token.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "429":
+          description: Rate limit exceeded.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/password-reset/request:
+    post:
+      tags: [Client Auth]
+      summary: Request a password reset email
+      description: >
+        Enumeration-resistant: always returns `200` regardless of whether
+        the email exists. Rate-limited beyond the general API limit.
+      security: [{ csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+      responses:
+        "200":
+          description: Enumeration-resistant success, regardless of account state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+        "403":
+          description: Missing or invalid CSRF token.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "429":
+          description: Rate limit exceeded.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/password-reset/confirm:
+    post:
+      tags: [Client Auth]
+      summary: Set a new password using a reset token
+      description: >
+        Single-use, time-limited token from the reset email link. On
+        success, every active session for the account is revoked — the
+        client must log in again with the new password everywhere.
+      security: [{ csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string, maxLength: 64 }
+                password: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        "200":
+          description: Password updated; all sessions revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string }
+        "400":
+          description: Token is unknown, already used, or expired.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "403":
+          description: Missing or invalid CSRF token.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/login:
+    post:
+      tags: [Client Auth]
+      summary: Log in
+      description: >
+        Sets the httpOnly `clientToken` session cookie on success.
+        Unverified accounts are rejected even with the correct password.
+        After enough failed attempts, the account is time-locked (still
+        rejecting the correct password until the lockout expires) — see
+        `423` below. Rate-limited beyond the general API limit.
+      security: [{ csrfToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, maxLength: 254 }
+                password: { type: string }
+                honeypot:
+                  type: string
+                  description: Leave empty.
+                website_url:
+                  type: string
+                  description: Leave empty.
+      responses:
+        "200":
+          description: Login succeeded. `clientToken` cookie is set.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  email: { type: string }
+                  companyName: { type: string }
+                  newDeviceAlert:
+                    type: boolean
+                    description: True if this IP hasn't been seen for this account before.
+        "401":
+          description: Wrong email or password. Same response either way (no user enumeration).
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "403":
+          description: >
+            Missing/invalid CSRF token, **or** the email hasn't been
+            verified yet (`code: EMAIL_NOT_VERIFIED`).
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "423":
+          description: >
+            Account is time-locked after too many failed attempts
+            (`code: ACCOUNT_LOCKED`). The correct password is rejected
+            until the lockout expires.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "429":
+          description: Rate limit exceeded.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/logout:
+    post:
+      tags: [Client Account]
+      summary: Log out
+      description: >
+        Blocklists the current session token and clears the cookie. A
+        no-op success if there was no session to begin with.
+      security: [{ clientCookie: [], csrfToken: [] }]
+      responses:
+        "200":
+          description: Always succeeds.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+
+  /client/compliance:
+    get:
+      tags: [Client Account]
+      summary: View your own compliance checklist
+      description: >
+        Every checklist item, grouped by framework, with your current
+        status on each (defaulting to `pending` for anything not yet
+        assessed).
+      security: [{ clientCookie: [] }]
+      responses:
+        "200":
+          description: The full checklist, grouped by framework.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  frameworks:
+                    type: object
+                    description: Keyed by framework name (e.g. "PCI DSS").
+                    additionalProperties:
+                      type: array
+                      items: { $ref: "#/components/schemas/ComplianceItem" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/risk-score:
+    get:
+      tags: [Client Account]
+      summary: View your own risk score
+      security: [{ clientCookie: [] }]
+      responses:
+        "200":
+          description: Current score.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  score: { type: [integer, "null"] }
+                  itemCount:
+                    type: integer
+                    description: Number of applicable (non-"not applicable") checklist items this score is based on.
+                  frameworkBreakdown:
+                    type: object
+                    description: Per-framework score (0-100), keyed by framework name.
+                    additionalProperties:
+                      type: number
+                  label: { $ref: "#/components/schemas/ScoreLabel" }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/security-events:
+    get:
+      tags: [Client Account]
+      summary: View your own login history
+      description: IP addresses are masked for privacy. Paginated.
+      security: [{ clientCookie: [] }]
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: A page of login attempts, most recent first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        ipAddress: { type: string, description: "Masked, e.g. 203.0.xxx.xxx" }
+                        success: { type: boolean }
+                        createdAt: { type: string, format: date-time }
+                  failedCount:
+                    type: integer
+                    description: Failed-login count within this page's results only.
+                  total: { type: integer }
+                  page: { type: integer }
+                  limit: { type: integer }
+                  totalPages: { type: integer }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/sessions:
+    get:
+      tags: [Client Account]
+      summary: List your own active sessions
+      security: [{ clientCookie: [] }]
+      responses:
+        "200":
+          description: All currently active (non-expired) sessions for your account.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        jti: { type: string, description: Session identifier. }
+                        ipAddress: { type: string }
+                        userAgent: { type: string }
+                        expiresAt: { type: string, format: date-time }
+                        createdAt: { type: string, format: date-time }
+                        isCurrent:
+                          type: boolean
+                          description: True for the session making this request.
+        "401":
+          description: Not authenticated.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+  /client/sessions/{jti}/revoke:
+    post:
+      tags: [Client Account]
+      summary: Revoke one of your other sessions
+      description: >
+        Use `POST /client/logout` for the session making the current
+        request — this endpoint refuses to revoke it (`400`), specifically
+        so you can't accidentally lock yourself out via this route.
+      security: [{ clientCookie: [], csrfToken: [] }]
+      parameters:
+        - name: jti
+          in: path
+          required: true
+          schema: { type: string }
+          description: The session identifier from `GET /client/sessions`.
+      responses:
+        "200":
+          description: Session revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string }
+        "400":
+          description: Attempted to revoke the current session via this endpoint.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "401":
+          description: Not authenticated.
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+        "404":
+          description: No matching active session (not found, or already expired).
+          content:
+            application/json: { schema: { $ref: "#/components/schemas/Error" } }
+
+components:
+  securitySchemes:
+    clientCookie:
+      type: apiKey
+      in: cookie
+      name: clientToken
+      description: httpOnly session cookie set by POST /client/login.
+    csrfToken:
+      type: apiKey
+      in: header
+      name: x-csrf-token
+      description: Required on every state-changing request. Fetch from GET /csrf-token.
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: Present on some errors for programmatic handling (e.g. EMAIL_NOT_VERIFIED, ACCOUNT_LOCKED).
+      required: [error]
+
+    ValidationError:
+      type: object
+      properties:
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              value: {}
+              msg: { type: string }
+              path: { type: string }
+              location: { type: string }
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        db:
+          type: string
+          enum: [up, down]
+        timestamp:
+          type: string
+          format: date-time
+
+    ScoreLabel:
+      type: string
+      enum: [Strong, Adequate, Developing, "Needs attention", "Not yet assessed"]
+
+    ComplianceItem:
+      type: object
+      properties:
+        id: { type: integer }
+        framework: { type: string }
+        item_key: { type: string }
+        title: { type: string }
+        description: { type: string }
+        sort_order: { type: integer }
+        status:
+          type: string
+          enum: [pending, in_progress, passing, failing, not_applicable]
+        notes:
+          type: [string, "null"]
+        updated_at:
+          type: [string, "null"]
+          format: date-time
