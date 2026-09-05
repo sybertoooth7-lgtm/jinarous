@@ -6,6 +6,8 @@ import ClientDashboard from './pages/ClientDashboard';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminUsers from './pages/AdminUsers';
+import AdminSubmissions from './pages/AdminSubmissions';
+import AdminSecurity from './pages/AdminSecurity';
 import VerifyEmail from './pages/VerifyEmail';
 import VerifyScore from './pages/VerifyScore';
 import ForgotPassword from './pages/ForgotPassword';
@@ -49,6 +51,8 @@ function App() {
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
         <Route path="/admin/users" element={<AdminUsers />} />
+        <Route path="/admin/submissions" element={<AdminSubmissions />} />
+        <Route path="/admin/security" element={<AdminSecurity />} />
         <Route path="/verify/:token" element={<VerifyScore />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/terms-of-service" element={<TermsOfService />} />
